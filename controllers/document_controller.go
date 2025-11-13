@@ -2,6 +2,8 @@ package controllers
 
 import (
 	"net/http"
+	"path/filepath"
+	"strings"
 
 	"dinsos_kuburaya/config"
 	"dinsos_kuburaya/models"
@@ -10,7 +12,7 @@ import (
 )
 
 // =======================
-// CREATE DOCUMENT
+// CREATE DOCUMENT (Cloudinary Integration)
 // =======================
 func CreateDocument(c *gin.Context) {
 	sender := c.PostForm("sender")
@@ -18,13 +20,14 @@ func CreateDocument(c *gin.Context) {
 	letterType := c.PostForm("letter_type")
 	userID := c.PostForm("user_id")
 
+	// Ambil file dari form
 	file, err := c.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "File tidak ditemukan"})
 		return
 	}
 
-	// buka file untuk dibaca
+	// Buka file
 	src, err := file.Open()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal membuka file: " + err.Error()})
@@ -32,17 +35,34 @@ func CreateDocument(c *gin.Context) {
 	}
 	defer src.Close()
 
-	// upload ke Google Drive
-	fileID, err := config.UploadToDrive(src, file.Filename)
+	// ======================
+	// Deteksi tipe file
+	// ======================
+	ext := strings.ToLower(filepath.Ext(file.Filename))
+	resourceType := "raw"
+	folder := "arsip"
+
+	switch ext {
+	case ".jpg", ".jpeg", ".png", ".gif", ".webp":
+		resourceType = "image"
+		folder = "gambar"
+	}
+
+	// ======================
+	// Upload ke Cloudinary
+	// ======================
+	fileURL, err := config.UploadToCloudinary(src, file.Filename, folder, resourceType)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal upload ke Google Drive: " + err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal upload ke Cloudinary: " + err.Error()})
 		return
 	}
 
-	// hanya simpan nama file dan ID drive
+	// ======================
+	// Simpan ke database
+	// ======================
 	document := models.Document{
 		Sender:     sender,
-		FileName:   file.Filename,
+		FileName:   fileURL, // simpan URL hasil upload, bukan nama file lokal
 		Subject:    subject,
 		LetterType: letterType,
 	}
@@ -56,10 +76,11 @@ func CreateDocument(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"message":   "Dokumen berhasil diupload ke Google Drive",
-		"file_id":   fileID,
-		"file_name": file.Filename,
+	c.JSON(http.StatusOK, gin.H{
+		"message":   "Dokumen berhasil diupload dan disimpan",
+		"file_url":  fileURL,
+		"folder":    folder,
+		"file_type": resourceType,
 		"document":  document,
 	})
 }

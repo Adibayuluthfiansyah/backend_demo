@@ -2,7 +2,6 @@ package main
 
 import (
 	"log"
-	"net/http"
 
 	"dinsos_kuburaya/middleware" // ganti sesuai nama modul kamu
 
@@ -28,12 +27,6 @@ func main() {
 	// Gunakan rate limiter
 	r.Use(middleware.RateLimiter())
 	r.Use(middleware.CORSMiddleware())
-
-	r.GET("/", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"message": "Halo, masih dalam batas aman 😎",
-		})
-	})
 
 	r.Run(":8080")
 }
