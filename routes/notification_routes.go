@@ -8,17 +8,15 @@ import (
 )
 
 func NotificationRoutes(router *gin.RouterGroup) {
-	// Group sudah punya prefix "/api" dari main.go
-	// Jadi route ini akan jadi "/api/notifications"
-
 	notifications := router.Group("/notifications")
 	notifications.Use(middleware.AuthMiddleware())
 	{
-		// GET /api/notifications
-		notifications.GET("", controllers.GetNotifications)  // Tanpa slash
-		notifications.GET("/", controllers.GetNotifications) // Dengan slash (fallback)
+		// Handle tanpa trailing slash
+		notifications.GET("", controllers.GetNotifications)
 
-		// POST /api/notifications/:id/read
+		// Handle dengan trailing slash (fallback)
+		notifications.GET("/", controllers.GetNotifications)
+
 		notifications.POST("/:id/read", controllers.MarkNotificationAsRead)
 	}
 }

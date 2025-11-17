@@ -15,8 +15,15 @@ func SuperiorOrderRoutes(router *gin.RouterGroup) {
 
 	{
 		// Hanya admin yang boleh akses semua route CRUD
+		// Handle tanpa trailing slash
+		superior.POST("", middleware.AdminOnly(), controllers.CreateSuperiorOrder)
+		superior.GET("", middleware.AdminOnly(), controllers.GetSuperiorOrders)
+
+		// Handle dengan trailing slash (fallback)
 		superior.POST("/", middleware.AdminOnly(), controllers.CreateSuperiorOrder)
 		superior.GET("/", middleware.AdminOnly(), controllers.GetSuperiorOrders)
+
+		// Routes dengan parameter
 		superior.GET("/:id", middleware.AdminOnly(), controllers.GetSuperiorOrdersByDocument)
 		superior.PUT("/:id", middleware.AdminOnly(), controllers.UpdateSuperiorOrder)
 		superior.DELETE("/:id", middleware.AdminOnly(), controllers.DeleteSuperiorOrder)

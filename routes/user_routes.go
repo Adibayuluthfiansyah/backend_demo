@@ -7,24 +7,27 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func UserRoutes(router *gin.RouterGroup) { // <-- Terima RouterGroup
-	users := router.Group("/users") // <-- HANYA tambahkan /users
+func UserRoutes(router *gin.RouterGroup) {
+	users := router.Group("/users")
 
-	// Rute create admin tidak perlu auth, jadi kita pindah
+	// Rute create admin tidak perlu auth
 	users.POST("/admin", controllers.CreateAdmin)
 
-	// Grup baru untuk rute yang perlu auth
+	// Grup untuk rute yang perlu auth
 	usersAuth := users.Group("")
 	usersAuth.Use(middleware.AuthMiddleware())
 	{
-		usersAuth.POST("/staff", middleware.AdminOnly(), controllers.CreateStaff)
-		usersAuth.DELETE("/:id", middleware.AdminOnly(), controllers.DeleteUser)
-		usersAuth.GET("/", controllers.GetUsers)
+		// Handle tanpa trailing slash
+		usersAuth.GET("", controllers.GetUsers)
+		usersAuth.GET("/me", controllers.GetMe)
 		usersAuth.GET("/:id", controllers.GetUserByID)
 		usersAuth.PUT("/:id", controllers.UpdateUser)
 
-		// Rute /me dari perbaikan sebelumnya
-		usersAuth.GET("/me", controllers.GetMe)
+		// Handle dengan trailing slash (fallback)
+		usersAuth.GET("/", controllers.GetUsers)
 
+		// Admin only routes
+		usersAuth.POST("/staff", middleware.AdminOnly(), controllers.CreateStaff)
+		usersAuth.DELETE("/:id", middleware.AdminOnly(), controllers.DeleteUser)
 	}
 }

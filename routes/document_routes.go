@@ -14,10 +14,15 @@ func DocumentRoutes(r *gin.RouterGroup) {
 	api.Use(middleware.AuthMiddleware(), middleware.AdminOnly())
 
 	{
-		api.POST("/", controllers.CreateDocument)
-		api.GET("/", controllers.GetDocuments)
+		// Handle tanpa trailing slash
+		api.POST("", controllers.CreateDocument)
+		api.GET("", controllers.GetDocuments)
 		api.GET("/:id", controllers.GetDocumentByID)
 		api.PUT("/:id", controllers.UpdateDocument)
 		api.DELETE("/:id", controllers.DeleteDocument)
+
+		// Handle dengan trailing slash (fallback)
+		api.POST("/", controllers.CreateDocument)
+		api.GET("/", controllers.GetDocuments)
 	}
 }
