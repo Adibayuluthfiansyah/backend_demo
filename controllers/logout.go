@@ -15,25 +15,21 @@ type LogoutRequest struct {
 }
 
 // Logout menghapus token dari tabel secret_tokens
+
 func Logout(c *gin.Context) {
-	var input LogoutRequest
-	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"message": "Input tidak valid"})
+	// Ambil user dari middleware
+	userRaw, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User tidak terautentikasi"})
 		return
 	}
 
+	user := userRaw.(models.User)
 	db := config.DB
 
-	// Cari token berdasarkan token_id
-	var secretToken models.SecretToken
-	if err := db.Where("id = ?", input.TokenID).First(&secretToken).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"message": "Token tidak ditemukan"})
-		return
-	}
-
-	// Hapus token dari database (logout)
-	if err := db.Delete(&secretToken).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal logout"})
+	// Hapus semua token user ini
+	if err := db.Where("user_id = ?", user.ID).Delete(&models.SecretToken{}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal logout"})
 		return
 	}
 
