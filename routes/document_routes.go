@@ -2,12 +2,17 @@ package routes
 
 import (
 	"dinsos_kuburaya/controllers"
+	"dinsos_kuburaya/middleware"
 
 	"github.com/gin-gonic/gin"
 )
 
 func DocumentRoutes(r *gin.Engine) {
 	api := r.Group("/api/documents")
+
+	// WAJIB login + wajib admin
+	api.Use(middleware.AuthMiddleware(), middleware.AdminOnly())
+
 	{
 		api.POST("/", controllers.CreateDocument)
 		api.GET("/", controllers.GetDocuments)

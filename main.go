@@ -3,32 +3,54 @@ package main
 import (
 	"log"
 
-	"dinsos_kuburaya/middleware" // ganti sesuai nama modul kamu
-
 	"github.com/gin-gonic/gin"
 
 	"dinsos_kuburaya/config"
+	"dinsos_kuburaya/middleware"
 	"dinsos_kuburaya/models"
 	"dinsos_kuburaya/routes"
 )
 
 func main() {
 	r := gin.Default()
+	r.MaxMultipartMemory = 100 << 20
 
-	routes.UserRoutes(r)
-	routes.DocumentRoutes(r)
-	routes.LoginRoutes(r)
-	routes.LogoutRoutes(r)
-
+	// ============================
+	// CONNECT DATABASE FIRST
+	// ============================
 	config.ConnectDatabase()
 
-	if err := config.DB.AutoMigrate(&models.User{}, &models.Document{}, &models.SecretToken{}, &models.SuperiorOrder{}, &models.DocumentStaff{}); err != nil {
+	// ============================
+	// AUTOMIGRATE
+	// ============================
+	if err := config.DB.AutoMigrate(
+		&models.User{},
+		&models.Document{},
+		&models.SecretToken{},
+		&models.SuperiorOrder{},
+		&models.DocumentStaff{},
+	); err != nil {
 		log.Fatal("Gagal migrasi tabel:", err)
 	}
 
-	// Gunakan rate limiter
+	// ============================
+	// GLOBAL MIDDLEWARE
+	// ============================
 	r.Use(middleware.RateLimiter())
 	r.Use(middleware.CORSMiddleware())
 
+	// ============================
+	// ROUTES
+	// ============================
+	routes.LoginRoutes(r) // biasanya login tidak pakai AuthMiddleware
+	routes.LogoutRoutes(r)
+	routes.UserRoutes(r)
+	routes.DocumentRoutes(r)
+	routes.DocumentStaffRoutes(r)
+	routes.SuperiorOrderRoutes(r)
+
+	// ============================
+	// RUN SERVER
+	// ============================
 	r.Run(":8080")
 }

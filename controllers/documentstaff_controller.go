@@ -12,13 +12,9 @@ import (
 )
 
 // ======================================================
-// CREATE DOCUMENT
+// CREATE DOCUMENT STAFF
 // ======================================================
-func CreateDocument(c *gin.Context) {
-	sender := c.PostForm("sender")
-	subject := c.PostForm("subject")
-	letterType := c.PostForm("letter_type")
-
+func CreateDocumentStaff(c *gin.Context) {
 	userRaw, exists := c.Get("user")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "User tidak terautentikasi"})
@@ -26,6 +22,7 @@ func CreateDocument(c *gin.Context) {
 	}
 	user := userRaw.(models.User)
 
+	subject := c.PostForm("subject")
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "File tidak ditemukan"})
@@ -41,14 +38,13 @@ func CreateDocument(c *gin.Context) {
 
 	ext := strings.ToLower(filepath.Ext(fileHeader.Filename))
 	var resourceType string
-
 	switch ext {
 	case ".jpg", ".jpeg", ".png", ".gif", ".webp":
 		resourceType = "image"
 	case ".pdf":
 		resourceType = "raw"
 	default:
-		c.JSON(http.StatusBadRequest, gin.H{"error": "format file tidak didukung. Hanya PDF atau gambar"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Format file tidak didukung. Hanya PDF atau gambar"})
 		return
 	}
 
@@ -58,14 +54,12 @@ func CreateDocument(c *gin.Context) {
 		return
 	}
 
-	document := models.Document{
-		Sender:       sender,
-		Subject:      subject,
-		LetterType:   letterType,
+	document := models.DocumentStaff{
+		UserID:       user.ID,
 		FileName:     url,
 		PublicID:     publicID,
 		ResourceType: resourceType,
-		UserID:       &user.ID,
+		Subject:      subject,
 	}
 
 	if err := config.DB.Create(&document).Error; err != nil {
@@ -74,62 +68,52 @@ func CreateDocument(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"document": document})
+	c.JSON(http.StatusCreated, gin.H{"document_staff": document})
 }
 
 // ======================================================
-// GET ALL
+// GET ALL DOCUMENT STAFF
 // ======================================================
-func GetDocuments(c *gin.Context) {
-	var documents []models.Document
+func GetDocumentStaffs(c *gin.Context) {
+	var documents []models.DocumentStaff
 	config.DB.Preload("User").Find(&documents)
-	c.JSON(http.StatusOK, gin.H{"documents": documents})
+	c.JSON(http.StatusOK, gin.H{"document_staffs": documents})
 }
 
 // ======================================================
-// GET BY ID
+// GET DOCUMENT STAFF BY ID
 // ======================================================
-func GetDocumentByID(c *gin.Context) {
+func GetDocumentStaffByID(c *gin.Context) {
 	id := c.Param("id")
-	var document models.Document
+	var document models.DocumentStaff
 
 	if err := config.DB.Preload("User").First(&document, "id = ?", id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Dokumen tidak ditemukan"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"document": document})
+	c.JSON(http.StatusOK, gin.H{"document_staff": document})
 }
 
 // ======================================================
-// UPDATE DOCUMENT
+// UPDATE DOCUMENT STAFF
 // ======================================================
-func UpdateDocument(c *gin.Context) {
+func UpdateDocumentStaff(c *gin.Context) {
 	id := c.Param("id")
-	var document models.Document
+	var document models.DocumentStaff
 
-	// Cari dokumen berdasarkan ID
 	if err := config.DB.First(&document, "id = ?", id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Dokumen tidak ditemukan"})
 		return
 	}
 
-	// Update field lain selain file
-	sender := c.PostForm("sender")
+	// Update subject jika ada
 	subject := c.PostForm("subject")
-	letterType := c.PostForm("letter_type")
-
-	if sender != "" {
-		document.Sender = sender
-	}
 	if subject != "" {
 		document.Subject = subject
 	}
-	if letterType != "" {
-		document.LetterType = letterType
-	}
 
-	// Cek apakah ada file baru
+	// Cek file baru
 	fileHeader, err := c.FormFile("file")
 	if err == nil {
 		src, err := fileHeader.Open()
@@ -141,7 +125,6 @@ func UpdateDocument(c *gin.Context) {
 
 		ext := strings.ToLower(filepath.Ext(fileHeader.Filename))
 		var resourceType string
-
 		switch ext {
 		case ".jpg", ".jpeg", ".png", ".gif", ".webp":
 			resourceType = "image"
@@ -152,14 +135,13 @@ func UpdateDocument(c *gin.Context) {
 			return
 		}
 
-		// Upload file baru
 		url, publicID, err := config.UploadToCloudinary(src, resourceType)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Upload gagal: " + err.Error()})
 			return
 		}
 
-		// Hapus file lama hanya jika ada publicID lama
+		// Hapus file lama jika ada
 		if document.PublicID != "" {
 			config.DeleteFromCloudinary(document.PublicID, document.ResourceType)
 		}
@@ -169,30 +151,30 @@ func UpdateDocument(c *gin.Context) {
 		document.ResourceType = resourceType
 	}
 
-	// Simpan perubahan
 	if err := config.DB.Save(&document).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menyimpan perubahan: " + err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Dokumen berhasil diperbarui", "document": document})
+	c.JSON(http.StatusOK, gin.H{"message": "Dokumen berhasil diperbarui", "document_staff": document})
 }
 
 // ======================================================
-// DELETE
+// DELETE DOCUMENT STAFF
 // ======================================================
-func DeleteDocument(c *gin.Context) {
+func DeleteDocumentStaff(c *gin.Context) {
 	id := c.Param("id")
-	var document models.Document
+	var document models.DocumentStaff
 
 	if err := config.DB.First(&document, "id = ?", id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Dokumen tidak ditemukan"})
 		return
 	}
 
-	// Gunakan PublicID + ResourceType dari database
+	// Hapus file dari Cloudinary
 	config.DeleteFromCloudinary(document.PublicID, document.ResourceType)
 
+	// Hapus dari DB
 	config.DB.Delete(&document)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Dokumen berhasil dihapus"})
