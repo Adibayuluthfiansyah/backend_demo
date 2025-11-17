@@ -185,3 +185,28 @@ func DeleteUser(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "User berhasil dihapus"})
 }
+
+// =======================
+// GET CURRENT USER (ME)
+// =======================
+func GetMe(c *gin.Context) {
+	// Ambil data user dari middleware
+	userRaw, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User tidak terautentikasi"})
+		return
+	}
+
+	// Casting data user
+	user := userRaw.(models.User)
+
+	// Kembalikan data user dalam format yang diharapkan frontend
+	c.JSON(http.StatusOK, gin.H{
+		"id":         user.ID,
+		"name":       user.Name,
+		"username":   user.Username,
+		"role":       user.Role,
+		"created_at": user.CreatedAt,
+		"updated_at": user.UpdatedAt,
+	})
+}

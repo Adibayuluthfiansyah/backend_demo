@@ -7,24 +7,24 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func UserRoutes(r *gin.Engine) {
-	users := r.Group("/api/users")
+func UserRoutes(router *gin.RouterGroup) { // <-- Terima RouterGroup
+	users := router.Group("/users") // <-- HANYA tambahkan /users
 
+	// Rute create admin tidak perlu auth, jadi kita pindah
 	users.POST("/admin", controllers.CreateAdmin)
 
-	// Semua route butuh login
-	users.Use(middleware.AuthMiddleware())
-
+	// Grup baru untuk rute yang perlu auth
+	usersAuth := users.Group("")
+	usersAuth.Use(middleware.AuthMiddleware())
 	{
-		// Hanya admin yang boleh create staff dan delete user
-		users.POST("/staff", middleware.AdminOnly(), controllers.CreateStaff)
-		users.DELETE("/:id", middleware.AdminOnly(), controllers.DeleteUser)
+		usersAuth.POST("/staff", middleware.AdminOnly(), controllers.CreateStaff)
+		usersAuth.DELETE("/:id", middleware.AdminOnly(), controllers.DeleteUser)
+		usersAuth.GET("/", controllers.GetUsers)
+		usersAuth.GET("/:id", controllers.GetUserByID)
+		usersAuth.PUT("/:id", controllers.UpdateUser)
 
-		// Semua user (admin & staff) bisa melihat
-		users.GET("/", controllers.GetUsers)
-		users.GET("/:id", controllers.GetUserByID)
+		// Rute /me dari perbaikan sebelumnya
+		usersAuth.GET("/me", controllers.GetMe)
 
-		// Update user bisa kamu tentukan (saya biarkan bebas)
-		users.PUT("/:id", controllers.UpdateUser)
 	}
 }

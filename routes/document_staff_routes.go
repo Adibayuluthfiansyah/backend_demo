@@ -7,8 +7,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func DocumentStaffRoutes(r *gin.Engine) {
-	docStaff := r.Group("/api/document_staff")
+func DocumentStaffRoutes(r *gin.RouterGroup) {
+	docStaff := r.Group("/document_staff")
 
 	// Semua route harus login
 	docStaff.Use(middleware.AuthMiddleware())

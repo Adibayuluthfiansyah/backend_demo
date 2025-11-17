@@ -7,7 +7,7 @@ import (
 )
 
 // LoginRoutes mendaftarkan endpoint untuk login
-func LoginRoutes(r *gin.Engine) {
+func LoginRoutes(r *gin.RouterGroup) {
 	api := r.Group("/api")
 	{
 		api.POST("/login", controllers.Login)

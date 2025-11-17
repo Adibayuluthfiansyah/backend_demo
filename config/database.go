@@ -20,7 +20,7 @@ func ConnectDatabase() {
 	}
 
 	user := os.Getenv("DB_USER")
-	pass := os.Getenv("DB_PASS")
+	pass := os.Getenv("DB_PASSWORD")
 	host := os.Getenv("DB_HOST")
 	name := os.Getenv("DB_NAME")
 

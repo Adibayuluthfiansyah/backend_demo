@@ -7,8 +7,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func SuperiorOrderRoutes(r *gin.Engine) {
-	superior := r.Group("/api/superior_orders")
+func SuperiorOrderRoutes(router *gin.RouterGroup) {
+	superior := router.Group("/superior_orders")
 
 	// Semua route butuh login
 	superior.Use(middleware.AuthMiddleware())

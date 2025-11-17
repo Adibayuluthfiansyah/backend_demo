@@ -7,8 +7,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func DocumentRoutes(r *gin.Engine) {
-	api := r.Group("/api/documents")
+func DocumentRoutes(r *gin.RouterGroup) {
+	api := r.Group("/documents")
 
 	// WAJIB login + wajib admin
 	api.Use(middleware.AuthMiddleware(), middleware.AdminOnly())
