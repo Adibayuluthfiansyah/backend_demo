@@ -17,43 +17,32 @@ func main() {
 
 	config.ConnectDatabase()
 
-	// ============================\
-	// AUTOMIGRATE
-	// ============================
 	if err := config.DB.AutoMigrate(
 		&models.User{},
 		&models.Document{},
 		&models.SecretToken{},
 		&models.SuperiorOrder{},
 		&models.DocumentStaff{},
-		&models.Notification{}, // <-- JANGAN LUPA TAMBAHKAN INI
+		&models.Notification{},
+		&models.ActivityLog{},
 	); err != nil {
 		log.Fatal("Gagal migrasi tabel:", err)
 	}
 
-	// ============================\
-	// GLOBAL MIDDLEWARE
-	// ============================
 	r.Use(middleware.RateLimiter())
 	r.Use(middleware.CORSMiddleware())
 
-	// ============================\
-	// BUAT SATU GRUP /api
-	// ============================
 	api := r.Group("/api")
 	{
 		// Rute yang tidak perlu Auth
-		routes.LoginRoutes(api)  // Kirim "api"
-		routes.LogoutRoutes(api) // Kirim "api"
-
-		// Rute yang perlu Auth (dikelola di dalam fungsi rute masing-masing)
-		routes.UserRoutes(api)          // Kirim "api"
-		routes.DocumentRoutes(api)      // Kirim "api"
-		routes.DocumentStaffRoutes(api) // Kirim "api"
-		routes.SuperiorOrderRoutes(api) // Kirim "api"
-
-		// Rute Notifikasi BARU Anda
-		routes.NotificationRoutes(api) // Kirim "api"
+		routes.LoginRoutes(api)
+		routes.LogoutRoutes(api)
+		routes.UserRoutes(api)
+		routes.DocumentRoutes(api)
+		routes.DocumentStaffRoutes(api)
+		routes.SuperiorOrderRoutes(api)
+		routes.NotificationRoutes(api)
+		routes.ActivityLogRoutes(api)
 	}
 
 	// ============================\

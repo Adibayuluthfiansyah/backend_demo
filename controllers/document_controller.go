@@ -100,6 +100,9 @@ func CreateDocument(c *gin.Context) {
 		return
 	}
 
+	// ===> TAMBAHAN: CATAT UPLOAD <===
+	CreateActivityLog(user.ID, user.Name, "UPLOAD_DOCUMENT", "Mengunggah dokumen: "+document.FileName)
+
 	c.JSON(http.StatusOK, gin.H{
 		"message":  "Dokumen berhasil diupload",
 		"document": document,
@@ -255,7 +258,6 @@ func DeleteDocument(c *gin.Context) {
 			fmt.Printf(" Gagal menghapus file dari Cloudinary (lanjutkan proses): %v\n", err)
 		}
 	} else {
-		// Ini untuk data lama yang di-upload sebelum kode diubah
 		fmt.Printf("PublicID atau ResourceType kosong untuk dokumen %s, skip delete Cloudinary\n", id)
 	}
 
@@ -263,6 +265,10 @@ func DeleteDocument(c *gin.Context) {
 	if err := config.DB.Delete(&document).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menghapus dokumen dari database: " + err.Error()})
 		return
+	}
+	if userRaw, exists := c.Get("user"); exists {
+		actor := userRaw.(models.User)
+		CreateActivityLog(actor.ID, actor.Name, "DELETE_DOCUMENT", "Menghapus dokumen: "+document.FileName)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Dokumen berhasil dihapus"})
