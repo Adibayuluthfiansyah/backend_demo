@@ -11,7 +11,7 @@ func UserRoutes(router *gin.RouterGroup) {
 	users := router.Group("/users")
 
 	// Rute create admin tidak perlu auth
-	users.POST("/admin", controllers.CreateAdmin)
+	users.POST("/admin", controllers.CreateAdmin) // nanti hapus pas deploy
 
 	// Grup untuk rute yang perlu auth
 	usersAuth := users.Group("")

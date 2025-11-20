@@ -108,7 +108,24 @@ func CreateDocumentStaff(c *gin.Context) {
 		return
 	}
 
-	// Load User relation untuk response
+	// ✅ CATAT LOG AKTIVITAS
+	msg := fmt.Sprintf("Mengupload dokumen baru dengan subjek: %s", document.Subject)
+	LogActivity(user.ID, user.Name, "UPLOAD_DOKUMEN", msg)
+
+	// ============================================================
+	// NOTIFIKASI KE ADMIN
+	// ============================================================
+	go func() {
+		var admins []models.User
+		if err := config.DB.Where("role = ?", "admin").Find(&admins).Error; err == nil {
+			for _, admin := range admins {
+				msg := fmt.Sprintf("Staff %s baru saja mengupload dokumen: %s", user.Name, document.Subject)
+				link := fmt.Sprintf("/dashboard/documents/%s", document.ID)
+
+				_ = CreateNotification(admin.ID, msg, link)
+			}
+		}
+	}()
 	config.DB.Preload("User").Find(&document)
 
 	c.JSON(http.StatusCreated, gin.H{
@@ -118,7 +135,7 @@ func CreateDocumentStaff(c *gin.Context) {
 }
 
 // ======================================================
-// GET ALL STAFF DOCUMENTS (UPDATED - Support UNION untuk Admin dengan User Info)
+// GET ALL STAFF DOCUMENTS (ADMIN + STAFF)
 // ======================================================
 func GetDocumentStaffs(c *gin.Context) {
 	// 1. Ambil User

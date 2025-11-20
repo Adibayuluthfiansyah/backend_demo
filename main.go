@@ -29,6 +29,27 @@ func main() {
 		log.Fatal("Gagal migrasi tabel:", err)
 	}
 
+	// === SEEDING ADMIN PERTAMA ===
+
+	// Aktifkan saat pertama kali menjalankan aplikasi,
+	// untuk membuat akun admin default.
+	// Setelah akun dibuat, sebaiknya nonaktifkan kembali kode ini.
+
+	// var count int64
+	// config.DB.Model(&models.User{}).Count(&count)
+	// if count == 0 {
+	// 	hashedPassword, _ := bcrypt.GenerateFromPassword([]byte("admin123"), bcrypt.DefaultCost)
+	// 	admin := models.User{
+	// 		ID:       uuid.NewString(),
+	// 		Name:     "Super Admin",
+	// 		Username: "admin",                // Username default
+	// 		Password: string(hashedPassword), // Password default: admin123
+	// 		Role:     "admin",
+	// 	}
+	// 	config.DB.Create(&admin)
+	// 	log.Println("⚠️ Admin default dibuat. Username: 'admin', Password: 'admin123'. Segera ganti!")
+	// }
+
 	r.Use(middleware.RateLimiter())
 	r.Use(middleware.CORSMiddleware())
 
