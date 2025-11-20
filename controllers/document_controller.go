@@ -167,36 +167,93 @@ func GetDocuments(c *gin.Context) {
 }
 
 // =======================
-// GET DOCUMENT BY ID
+// GET DOCUMENT BY ID (CEK DI KEDUA TABEL + PERMISSION)
 // =======================
 func GetDocumentByID(c *gin.Context) {
 	id := c.Param("id")
-	var document models.Document
 
-	if err := config.DB.Preload("User").Where("id = ?", id).First(&document).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Dokumen tidak ditemukan"})
+	// Ambil user dari context
+	userRaw, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	user := userRaw.(models.User)
+
+	// 1. Coba cari di documents dulu
+	var document models.Document
+	errDoc := config.DB.Preload("User").Where("id = ?", id).First(&document).Error
+
+	if errDoc == nil {
+		// Ketemu di documents
+
+		// ✅ CEK PERMISSION: Staff hanya bisa lihat dokumen miliknya
+		if user.Role != "admin" {
+			if document.UserID == nil || *document.UserID != user.ID {
+				c.JSON(http.StatusForbidden, gin.H{"error": "Anda tidak memiliki akses ke dokumen ini"})
+				return
+			}
+		}
+
+		userName := "-"
+		if document.User.Name != "" {
+			userName = document.User.Name
+		}
+
+		response := gin.H{
+			"id":          document.ID,
+			"sender":      document.Sender,
+			"file_name":   document.FileName,
+			"file_url":    document.FileURL,
+			"subject":     document.Subject,
+			"letter_type": document.LetterType,
+			"user_id":     document.UserID,
+			"user_name":   userName,
+			"created_at":  document.CreatedAt,
+			"updated_at":  document.UpdatedAt,
+		}
+
+		c.JSON(http.StatusOK, gin.H{"document": response})
 		return
 	}
 
-	userName := "-"
-	if document.User.Name != "" {
-		userName = document.User.Name
+	// 2. Kalau tidak ketemu, coba cari di document_staffs
+	var docStaff models.DocumentStaff
+	errStaff := config.DB.Preload("User").First(&docStaff, "id = ?", id).Error
+
+	if errStaff == nil {
+		// Ketemu di document_staffs
+
+		// ✅ CEK PERMISSION: Staff hanya bisa lihat dokumen miliknya
+		if user.Role != "admin" && docStaff.UserID != user.ID {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Anda tidak memiliki akses ke dokumen ini"})
+			return
+		}
+
+		userName := "-"
+		if docStaff.User.Name != "" {
+			userName = docStaff.User.Name
+		}
+
+		response := gin.H{
+			"id":          docStaff.ID,
+			"sender":      docStaff.Sender,
+			"file_name":   docStaff.FileName,
+			"file_url":    docStaff.FileName,
+			"subject":     docStaff.Subject,
+			"letter_type": docStaff.LetterType,
+			"user_id":     docStaff.UserID,
+			"user_name":   userName,
+			"created_at":  docStaff.CreatedAt,
+			"updated_at":  docStaff.UpdatedAt,
+		}
+
+		c.JSON(http.StatusOK, gin.H{"document": response})
+		return
 	}
 
-	response := gin.H{
-		"id":          document.ID,
-		"sender":      document.Sender,
-		"file_name":   document.FileName,
-		"file_url":    document.FileURL,
-		"subject":     document.Subject,
-		"letter_type": document.LetterType,
-		"user_id":     document.UserID,
-		"user_name":   userName,
-		"created_at":  document.CreatedAt,
-		"updated_at":  document.UpdatedAt,
-	}
-
-	c.JSON(http.StatusOK, gin.H{"document": response})
+	// 3. Tidak ketemu di keduanya
+	c.JSON(http.StatusNotFound, gin.H{"error": "Dokumen tidak ditemukan"})
 }
 
 // =======================
@@ -238,60 +295,103 @@ func UpdateDocument(c *gin.Context) {
 }
 
 // =======================
-// DELETE DOCUMENT
+// DELETE DOCUMENT (CEK DI KEDUA TABEL)
 // =======================
 func DeleteDocument(c *gin.Context) {
 	id := c.Param("id")
+
+	// 1. Coba hapus dari documents
 	var document models.Document
+	errDoc := config.DB.Where("id = ?", id).First(&document).Error
 
-	if err := config.DB.Where("id = ?", id).First(&document).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Dokumen tidak ditemukan"})
-		return
-	}
-
-	// --- INI  UNTUK HAPUS DARI CLOUDINARY ---
-
-	if document.PublicID != "" && document.ResourceType != "" {
-		// Panggil fungsi DeleteFromCloudinary
-		err := config.DeleteFromCloudinary(document.PublicID, document.ResourceType)
-		if err != nil {
-			fmt.Printf(" Gagal menghapus file dari Cloudinary (lanjutkan proses): %v\n", err)
+	if errDoc == nil {
+		// Hapus dari Cloudinary
+		if document.PublicID != "" && document.ResourceType != "" {
+			err := config.DeleteFromCloudinary(document.PublicID, document.ResourceType)
+			if err != nil {
+				fmt.Printf("⚠️ Gagal menghapus file dari Cloudinary: %v\n", err)
+			}
 		}
-	} else {
-		fmt.Printf("PublicID atau ResourceType kosong untuk dokumen %s, skip delete Cloudinary\n", id)
-	}
 
-	// Hapus dari database SETELAH mencoba hapus dari Cloudinary
-	if err := config.DB.Delete(&document).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menghapus dokumen dari database: " + err.Error()})
+		// Hapus dari database
+		if err := config.DB.Delete(&document).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menghapus dokumen: " + err.Error()})
+			return
+		}
+
+		// Log activity
+		if userRaw, exists := c.Get("user"); exists {
+			actor := userRaw.(models.User)
+			CreateActivityLog(actor.ID, actor.Name, "DELETE_DOCUMENT", "Menghapus dokumen: "+document.FileName)
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "Dokumen berhasil dihapus"})
 		return
 	}
-	if userRaw, exists := c.Get("user"); exists {
-		actor := userRaw.(models.User)
-		CreateActivityLog(actor.ID, actor.Name, "DELETE_DOCUMENT", "Menghapus dokumen: "+document.FileName)
+
+	// 2. Coba hapus dari document_staffs
+	var docStaff models.DocumentStaff
+	errStaff := config.DB.First(&docStaff, "id = ?", id).Error
+
+	if errStaff == nil {
+		// Hapus dari Cloudinary
+		if docStaff.PublicID != "" {
+			config.DeleteFromCloudinary(docStaff.PublicID, docStaff.ResourceType)
+		}
+
+		// Hapus dari database
+		config.DB.Delete(&docStaff)
+
+		c.JSON(http.StatusOK, gin.H{"message": "Dokumen berhasil dihapus"})
+		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Dokumen berhasil dihapus"})
+	// 3. Tidak ketemu
+	c.JSON(http.StatusNotFound, gin.H{"error": "Dokumen tidak ditemukan"})
 }
 
-// =======================
-// DOWNLOAD DOCUMENT
-// =======================
 func DownloadDocument(c *gin.Context) {
 	id := c.Param("id")
+
+	// Ambil user
+	userRaw, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	user := userRaw.(models.User)
+
+	// Cari di documents
 	var document models.Document
+	errDoc := config.DB.First(&document, "id = ?", id).Error
 
-	if err := config.DB.First(&document, "id = ?", id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Dokumen tidak ditemukan"})
+	if errDoc == nil && document.FileURL != "" {
+		// ✅ CEK PERMISSION
+		if user.Role != "admin" {
+			if document.UserID == nil || *document.UserID != user.ID {
+				c.JSON(http.StatusForbidden, gin.H{"error": "Tidak memiliki akses"})
+				return
+			}
+		}
+
+		c.Redirect(http.StatusTemporaryRedirect, document.FileURL)
 		return
 	}
 
-	if document.FileURL == "" {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Link file tidak tersedia"})
+	// Cari di document_staffs
+	var docStaff models.DocumentStaff
+	errStaff := config.DB.First(&docStaff, "id = ?", id).Error
+
+	if errStaff == nil && docStaff.FileName != "" {
+		// ✅ CEK PERMISSION
+		if user.Role != "admin" && docStaff.UserID != user.ID {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Tidak memiliki akses"})
+			return
+		}
+
+		c.Redirect(http.StatusTemporaryRedirect, docStaff.FileName)
 		return
 	}
 
-	fmt.Printf("📥 Download request redirect ke: %s\n", document.FileURL)
-
-	c.Redirect(http.StatusTemporaryRedirect, document.FileURL)
+	c.JSON(http.StatusNotFound, gin.H{"error": "File tidak tersedia"})
 }
