@@ -385,11 +385,26 @@ func GetDocumentStaffByID(c *gin.Context) {
 // ======================================================
 func UpdateDocumentStaff(c *gin.Context) {
 	id := c.Param("id")
+
+	// 1. Auth Check
+	userRaw, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	user := userRaw.(models.User)
+
 	var document models.DocumentStaff
 
-	// Cari dokumen lama dulu
+	// 2. Find Document
 	if err := config.DB.First(&document, "id = ?", id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Dokumen tidak ditemukan"})
+		return
+	}
+
+	// 3. SECURITY CHECK: Ensure ownership
+	if user.Role != "admin" && document.UserID != user.ID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Anda tidak memiliki izin untuk mengedit dokumen ini"})
 		return
 	}
 
@@ -413,10 +428,10 @@ func UpdateDocumentStaff(c *gin.Context) {
 		updates["letter_type"] = letterType
 	}
 
-	// HANDLE UPLOAD JIKA ADA FILE BARU
+	// 4. HANDLE FILE UPLOAD (New Logic)
 	fileHeader, err := c.FormFile("file")
 	if err == nil {
-		// Ada file baru yg diupload
+		// New file uploaded
 		src, err := fileHeader.Open()
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Tidak dapat membuka file"})
@@ -447,29 +462,27 @@ func UpdateDocumentStaff(c *gin.Context) {
 			return
 		}
 
-		// Upload file BARU
+		// Upload to Cloudinary
 		uploadResult, err := config.UploadToCloudinary(reader, fileHeader.Filename, folder, resourceType)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Upload gagal: " + err.Error()})
 			return
 		}
 
-		// Hapus file LAMA dari Cloudinary jika ada
+		// Delete old file if exists
 		if document.PublicID != "" {
-			// Error saat delete lama diabaikan saja (log only), jangan gagalkan update
 			err := config.DeleteFromCloudinary(document.PublicID, document.ResourceType)
 			if err != nil {
 				fmt.Println("Warning: Gagal menghapus file lama:", err)
 			}
 		}
 
-		// Masukkan data baru ke map updates
 		updates["file_name"] = uploadResult.SecureURL
 		updates["public_id"] = uploadResult.PublicID
 		updates["resource_type"] = resourceType
 	}
 
-	// Simpan update ke DB
+	// 5. Save Updates
 	if len(updates) > 0 {
 		if err := config.DB.Model(&document).Updates(updates).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menyimpan perubahan"})
@@ -477,7 +490,6 @@ func UpdateDocumentStaff(c *gin.Context) {
 		}
 	}
 
-	// Ambil data terbaru untuk response
 	config.DB.Preload("User").Find(&document)
 
 	c.JSON(http.StatusOK, gin.H{
