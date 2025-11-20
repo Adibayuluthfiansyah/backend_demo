@@ -163,17 +163,12 @@ func GetDocumentByID(c *gin.Context) {
 	}
 	user := userRaw.(models.User)
 
-	// 1. Cek di tabel DOCUMENTS (Biasanya milik Admin)
 	var document models.Document
 	errDoc := config.DB.Preload("User").Where("id = ?", id).First(&document).Error
 
 	if errDoc == nil {
-		// Ketemu di tabel documents.
-		// Cek akses: Admin boleh semua. Staff hanya boleh jika UserID cocok.
 		if user.Role != "admin" {
 			if document.UserID == nil || *document.UserID != user.ID {
-				// JANGAN langsung return forbidden, coba cek tabel sebelah dulu siapa tau ID sama
-				// Tapi karena UUID biasanya unik, kita bisa asumsikan jika ketemu disini dan bukan milik staff, maka forbidden
 				c.JSON(http.StatusForbidden, gin.H{"error": "Anda tidak memiliki akses ke dokumen admin ini"})
 				return
 			}
@@ -201,13 +196,10 @@ func GetDocumentByID(c *gin.Context) {
 		return
 	}
 
-	// 2. Cek di tabel DOCUMENT_STAFFS (Milik Staff)
 	var docStaff models.DocumentStaff
 	errStaff := config.DB.Preload("User").First(&docStaff, "id = ?", id).Error
 
 	if errStaff == nil {
-		// Ketemu di tabel staff.
-		// Cek akses: Admin boleh semua. Staff hanya boleh jika UserID cocok.
 		if user.Role != "admin" && docStaff.UserID != user.ID {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Anda tidak memiliki akses ke dokumen staff lain"})
 			return
@@ -252,33 +244,24 @@ func UpdateDocument(c *gin.Context) {
 	}
 	user := userRaw.(models.User)
 
-	// 1. Coba Update di tabel DOCUMENTS
 	var document models.Document
 	if err := config.DB.Where("id = ?", id).First(&document).Error; err == nil {
-		// Cek Permission
 		if user.Role != "admin" {
 			if document.UserID == nil || *document.UserID != user.ID {
 				c.JSON(http.StatusForbidden, gin.H{"error": "Tidak punya akses edit"})
 				return
 			}
 		}
-
-		// Lakukan Update Dokumen Admin
 		updateDocLogic(c, &document, user, "documents")
 		return
 	}
 
-	// 2. Coba Update di tabel DOCUMENT_STAFFS
 	var docStaff models.DocumentStaff
 	if err := config.DB.Where("id = ?", id).First(&docStaff).Error; err == nil {
-		// Cek Permission
 		if user.Role != "admin" && docStaff.UserID != user.ID {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Tidak punya akses edit"})
 			return
 		}
-
-		// Mapping ke struct Document sementara untuk reuse logic (karena field mirip)
-		// Atau kita buat logika update khusus untuk staff
 		updateDocStaffLogic(c, &docStaff, user)
 		return
 	}
@@ -286,7 +269,7 @@ func UpdateDocument(c *gin.Context) {
 	c.JSON(http.StatusNotFound, gin.H{"error": "Dokumen tidak ditemukan"})
 }
 
-// Helper untuk update tabel Document (Admin)
+// Helper untuk update tabel Document Admin
 func updateDocLogic(c *gin.Context, document *models.Document, user models.User, table string) {
 	sender := c.PostForm("sender")
 	subject := c.PostForm("subject")
@@ -302,7 +285,7 @@ func updateDocLogic(c *gin.Context, document *models.Document, user models.User,
 		document.LetterType = letterType
 	}
 
-	// Handle File Upload (Sama seperti sebelumnya)
+	// Handle File Upload
 	fileHeader, err := c.FormFile("file")
 	if err == nil {
 		src, _ := fileHeader.Open()
@@ -343,7 +326,7 @@ func updateDocLogic(c *gin.Context, document *models.Document, user models.User,
 	c.JSON(http.StatusOK, gin.H{"message": "Dokumen berhasil diperbarui", "document": document})
 }
 
-// Helper untuk update tabel DocumentStaff (Staff)
+// Helper untuk update tabel DocumentStaff Staff
 func updateDocStaffLogic(c *gin.Context, docStaff *models.DocumentStaff, user models.User) {
 	sender := c.PostForm("sender")
 	subject := c.PostForm("subject")
@@ -384,7 +367,7 @@ func updateDocStaffLogic(c *gin.Context, docStaff *models.DocumentStaff, user mo
 			return
 		}
 
-		docStaff.FileName = uploadResult.SecureURL // Ingat, di staff FileName isinya URL
+		docStaff.FileName = uploadResult.SecureURL
 		docStaff.PublicID = uploadResult.PublicID
 		docStaff.ResourceType = uploadResult.ResourceType
 	}
@@ -410,10 +393,8 @@ func DeleteDocument(c *gin.Context) {
 	}
 	user := userRaw.(models.User)
 
-	// 1. Cek di Documents
 	var document models.Document
 	if err := config.DB.Where("id = ?", id).First(&document).Error; err == nil {
-		// Permission Check
 		if user.Role != "admin" {
 			if document.UserID == nil || *document.UserID != user.ID {
 				c.JSON(http.StatusForbidden, gin.H{"error": "Tidak punya akses hapus"})
@@ -430,10 +411,8 @@ func DeleteDocument(c *gin.Context) {
 		return
 	}
 
-	// 2. Cek di DocumentStaff
 	var docStaff models.DocumentStaff
 	if err := config.DB.First(&docStaff, "id = ?", id).Error; err == nil {
-		// Permission Check
 		if user.Role != "admin" && docStaff.UserID != user.ID {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Tidak punya akses hapus"})
 			return

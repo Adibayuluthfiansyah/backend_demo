@@ -14,20 +14,18 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Struktur untuk input login
 type LoginRequest struct {
 	Username string `json:"username" binding:"required"`
 	Password string `json:"password" binding:"required"`
 }
 
-// Struktur untuk response sukses
 type LoginResponse struct {
 	TokenID string `json:"token_id"`
 	UserID  string `json:"user_id"`
 	Token   string `json:"token"`
 }
 
-// Fungsi utama login
+// Fungsi login
 func Login(c *gin.Context) {
 	var input LoginRequest
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -79,7 +77,6 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	// Kirim response ke frontend
 	c.JSON(http.StatusOK, gin.H{
 		"message":  "Login berhasil",
 		"token_id": secretToken.ID,

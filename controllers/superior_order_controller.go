@@ -49,7 +49,6 @@ func GetSuperiorOrders(c *gin.Context) {
 		return
 	}
 
-	// Map untuk menampung hasil akhir
 	type UserInfo struct {
 		Name string `json:"name"`
 	}
@@ -75,7 +74,6 @@ func GetSuperiorOrders(c *gin.Context) {
 		grouped[o.DocumentID].Users = append(grouped[o.DocumentID].Users, UserInfo{Name: o.User.Name})
 	}
 
-	// Ubah map menjadi slice untuk response
 	var result []DocumentInfo
 	for _, v := range grouped {
 		result = append(result, *v)
@@ -118,13 +116,11 @@ func UpdateSuperiorOrder(c *gin.Context) {
 		return
 	}
 
-	// Hapus semua user yang terkait dengan document_id
 	if err := config.DB.Where("document_id = ?", documentID).Delete(&models.SuperiorOrder{}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete old records: " + err.Error()})
 		return
 	}
 
-	// Tambahkan user_id baru
 	var created []models.SuperiorOrder
 	for _, userID := range input.UserIDs {
 		order := models.SuperiorOrder{

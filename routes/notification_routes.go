@@ -11,7 +11,6 @@ func NotificationRoutes(router *gin.RouterGroup) {
 	notifications := router.Group("/notifications")
 	notifications.Use(middleware.AuthMiddleware())
 	{
-		// Handle tanpa trailing slash
 		notifications.GET("", controllers.GetNotifications)
 
 		// Handle dengan trailing slash (fallback)

@@ -19,7 +19,6 @@ import (
 // CREATE STAFF DOCUMENT
 // ======================================================
 func CreateDocumentStaff(c *gin.Context) {
-	// 1. Cek User
 	userRaw, exists := c.Get("user")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
@@ -27,7 +26,6 @@ func CreateDocumentStaff(c *gin.Context) {
 	}
 	user := userRaw.(models.User)
 
-	// 2. Ambil Form Data
 	sender := c.PostForm("sender")
 	subject := c.PostForm("subject")
 	letterType := c.PostForm("letter_type")
@@ -42,7 +40,6 @@ func CreateDocumentStaff(c *gin.Context) {
 		return
 	}
 
-	// 3. Handle File
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "File tidak ditemukan"})
@@ -56,7 +53,6 @@ func CreateDocumentStaff(c *gin.Context) {
 	}
 	defer src.Close()
 
-	// Baca file ke buffer
 	fileBytes, err := io.ReadAll(src)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal membaca file buffer"})
@@ -64,7 +60,6 @@ func CreateDocumentStaff(c *gin.Context) {
 	}
 	reader := bytes.NewReader(fileBytes)
 
-	// 4. Tentukan Folder & Resource Type
 	ext := strings.ToLower(filepath.Ext(fileHeader.Filename))
 	var resourceType string
 	var folder string
@@ -72,17 +67,16 @@ func CreateDocumentStaff(c *gin.Context) {
 	switch ext {
 	case ".jpg", ".jpeg", ".png", ".gif", ".webp":
 		resourceType = "image"
-		folder = "dinsos_kuburaya/gambar" // Nama folder di Cloudinary
+		folder = "dinsos_kuburaya/gambar"
 	case ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx":
 		resourceType = "raw"
-		folder = "dinsos_kuburaya/arsip" // Nama folder di Cloudinary
+		folder = "dinsos_kuburaya/arsip"
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Format file tidak didukung"})
 		return
 	}
 
-	// 5. Upload ke Cloudinary (Menggunakan Helper Baru)
-	// Pastikan config.UploadToCloudinary menerima 4 parameter: (reader, filename, folder, type)
+	// Upload ke Cloudinary
 	uploadResult, err := config.UploadToCloudinary(reader, fileHeader.Filename, folder, resourceType)
 	if err != nil {
 		fmt.Println("Upload Error:", err) // Debug print
@@ -90,25 +84,24 @@ func CreateDocumentStaff(c *gin.Context) {
 		return
 	}
 
-	// 6. Simpan ke Database
+	// Simpan ke Database
 	document := models.DocumentStaff{
 		UserID:       user.ID,
 		Sender:       sender,
 		Subject:      subject,
 		LetterType:   letterType,
-		FileName:     uploadResult.SecureURL, // URL File
-		PublicID:     uploadResult.PublicID,  // ID untuk hapus nanti
+		FileName:     uploadResult.SecureURL,
+		PublicID:     uploadResult.PublicID,
 		ResourceType: resourceType,
 	}
 
 	if err := config.DB.Create(&document).Error; err != nil {
-		// Jika DB gagal, hapus file yang baru diupload agar tidak nyampah
 		config.DeleteFromCloudinary(uploadResult.PublicID, resourceType)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "DB error: " + err.Error()})
 		return
 	}
 
-	// ✅ CATAT LOG AKTIVITAS
+	// CATAT LOG AKTIVITAS
 	msg := fmt.Sprintf("Mengupload dokumen baru dengan subjek: %s", document.Subject)
 	LogActivity(user.ID, user.Name, "UPLOAD_DOKUMEN", msg)
 
@@ -146,7 +139,6 @@ func GetDocumentStaffs(c *gin.Context) {
 	}
 	user := userRaw.(models.User)
 
-	// 2. Ambil Query Params
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "100"))
 	search := c.Query("search")
@@ -163,7 +155,7 @@ func GetDocumentStaffs(c *gin.Context) {
 			LetterType string  `json:"letter_type"`
 			FileName   string  `json:"file_name"`
 			UserID     *string `json:"user_id"`
-			UserName   string  `json:"user_name"` // TAMBAHAN
+			UserName   string  `json:"user_name"`
 			CreatedAt  string  `json:"created_at"`
 			UpdatedAt  string  `json:"updated_at"`
 			Source     string  `json:"source"`
@@ -171,7 +163,6 @@ func GetDocumentStaffs(c *gin.Context) {
 
 		var combinedDocs []CombinedDoc
 
-		// Build WHERE clause untuk search
 		searchWhere := ""
 		searchArgs := []interface{}{}
 		if search != "" {
@@ -180,7 +171,6 @@ func GetDocumentStaffs(c *gin.Context) {
 			searchArgs = []interface{}{searchPattern, searchPattern, searchPattern, searchPattern}
 		}
 
-		// Build WHERE clause untuk letter_type
 		letterTypeWhere := ""
 		letterTypeArgs := []interface{}{}
 		if letterType != "" && letterType != "all" {
@@ -188,7 +178,6 @@ func GetDocumentStaffs(c *gin.Context) {
 			letterTypeArgs = []interface{}{letterType}
 		}
 
-		// Query UNION dengan JOIN ke users
 		query := fmt.Sprintf(`
 			SELECT 
 				d.id, 
@@ -226,7 +215,6 @@ func GetDocumentStaffs(c *gin.Context) {
 			LIMIT ? OFFSET ?
 		`, searchWhere, letterTypeWhere, searchWhere, letterTypeWhere)
 
-		// Gabungkan arguments
 		args := []interface{}{}
 		args = append(args, searchArgs...)
 		args = append(args, letterTypeArgs...)
@@ -287,7 +275,7 @@ func GetDocumentStaffs(c *gin.Context) {
 	}
 
 	// ======================================================
-	// STAFF: Hanya document_staffs miliknya
+	// STAFF hanya ambil document staff
 	// ======================================================
 	var documents []models.DocumentStaff
 
@@ -339,34 +327,29 @@ func GetDocumentStaffs(c *gin.Context) {
 }
 
 // ======================================================
-// GET BY ID (Cek di KEDUA tabel)
+// GET BY ID Cek di KEDUA tabel
 // ======================================================
 func GetDocumentStaffByID(c *gin.Context) {
 	id := c.Param("id")
 
-	// 1. Coba cari di document_staffs dulu
 	var docStaff models.DocumentStaff
 	errStaff := config.DB.Preload("User").First(&docStaff, "id = ?", id).Error
 
 	if errStaff == nil {
-		// Ketemu di document_staffs
 		c.JSON(http.StatusOK, gin.H{"document": docStaff})
 		return
 	}
 
-	// 2. Kalau tidak ketemu, coba cari di documents
 	var doc models.Document
 	errDoc := config.DB.Preload("User").First(&doc, "id = ?", id).Error
 
 	if errDoc == nil {
-		// Ketemu di documents
-		// Format response agar sama dengan document_staff
 		response := gin.H{
 			"id":          doc.ID,
 			"sender":      doc.Sender,
 			"subject":     doc.Subject,
 			"letter_type": doc.LetterType,
-			"file_name":   doc.FileURL, // di documents pakai file_url
+			"file_name":   doc.FileURL,
 			"user_id":     doc.UserID,
 			"created_at":  doc.CreatedAt,
 			"updated_at":  doc.UpdatedAt,
@@ -376,7 +359,6 @@ func GetDocumentStaffByID(c *gin.Context) {
 		return
 	}
 
-	// 3. Tidak ketemu di keduanya
 	c.JSON(http.StatusNotFound, gin.H{"error": "Dokumen tidak ditemukan"})
 }
 
@@ -386,7 +368,6 @@ func GetDocumentStaffByID(c *gin.Context) {
 func UpdateDocumentStaff(c *gin.Context) {
 	id := c.Param("id")
 
-	// 1. Auth Check
 	userRaw, exists := c.Get("user")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
@@ -396,13 +377,11 @@ func UpdateDocumentStaff(c *gin.Context) {
 
 	var document models.DocumentStaff
 
-	// 2. Find Document
 	if err := config.DB.First(&document, "id = ?", id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Dokumen tidak ditemukan"})
 		return
 	}
 
-	// 3. SECURITY CHECK: Ensure ownership
 	if user.Role != "admin" && document.UserID != user.ID {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Anda tidak memiliki izin untuk mengedit dokumen ini"})
 		return
@@ -428,10 +407,8 @@ func UpdateDocumentStaff(c *gin.Context) {
 		updates["letter_type"] = letterType
 	}
 
-	// 4. HANDLE FILE UPLOAD (New Logic)
 	fileHeader, err := c.FormFile("file")
 	if err == nil {
-		// New file uploaded
 		src, err := fileHeader.Open()
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Tidak dapat membuka file"})
@@ -469,20 +446,18 @@ func UpdateDocumentStaff(c *gin.Context) {
 			return
 		}
 
-		// Delete old file if exists
+		// Delete data lama jika ada
 		if document.PublicID != "" {
 			err := config.DeleteFromCloudinary(document.PublicID, document.ResourceType)
 			if err != nil {
 				fmt.Println("Warning: Gagal menghapus file lama:", err)
 			}
 		}
-
 		updates["file_name"] = uploadResult.SecureURL
 		updates["public_id"] = uploadResult.PublicID
 		updates["resource_type"] = resourceType
 	}
 
-	// 5. Save Updates
 	if len(updates) > 0 {
 		if err := config.DB.Model(&document).Updates(updates).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menyimpan perubahan"})
@@ -499,12 +474,11 @@ func UpdateDocumentStaff(c *gin.Context) {
 }
 
 // ======================================================
-// DELETE (Cek di KEDUA tabel)
+// DELETE Cek di KEDUA tabel
 // ======================================================
 func DeleteDocumentStaff(c *gin.Context) {
 	id := c.Param("id")
 
-	// 1. Coba hapus dari document_staffs
 	var docStaff models.DocumentStaff
 	errStaff := config.DB.First(&docStaff, "id = ?", id).Error
 
@@ -518,18 +492,15 @@ func DeleteDocumentStaff(c *gin.Context) {
 		return
 	}
 
-	// 2. Coba hapus dari documents
 	var doc models.Document
 	errDoc := config.DB.First(&doc, "id = ?", id).Error
 
 	if errDoc == nil {
-		// Hapus file dari Cloudinary
 		if doc.PublicID != "" {
 			config.DeleteFromCloudinary(doc.PublicID, doc.ResourceType)
 		}
 		config.DB.Delete(&doc)
 
-		// Log activity
 		if userRaw, exists := c.Get("user"); exists {
 			actor := userRaw.(models.User)
 			CreateActivityLog(actor.ID, actor.Name, "DELETE_DOCUMENT", "Menghapus dokumen: "+doc.FileName)
@@ -538,18 +509,15 @@ func DeleteDocumentStaff(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "Dokumen berhasil dihapus"})
 		return
 	}
-
-	// 3. Tidak ketemu
 	c.JSON(http.StatusNotFound, gin.H{"error": "Dokumen tidak ditemukan"})
 }
 
 // ======================================================
-// DOWNLOAD (Cek di KEDUA tabel)
+// DOWNLOAD Cek di KEDUA tabel
 // ======================================================
 func DownloadDocumentStaff(c *gin.Context) {
 	id := c.Param("id")
 
-	// 1. Coba cari di document_staffs dulu
 	var docStaff models.DocumentStaff
 	errStaff := config.DB.First(&docStaff, "id = ?", id).Error
 
@@ -558,7 +526,6 @@ func DownloadDocumentStaff(c *gin.Context) {
 		return
 	}
 
-	// 2. Coba cari di documents
 	var doc models.Document
 	errDoc := config.DB.First(&doc, "id = ?", id).Error
 
@@ -567,6 +534,5 @@ func DownloadDocumentStaff(c *gin.Context) {
 		return
 	}
 
-	// 3. Tidak ketemu
 	c.JSON(http.StatusNotFound, gin.H{"error": "File tidak tersedia"})
 }

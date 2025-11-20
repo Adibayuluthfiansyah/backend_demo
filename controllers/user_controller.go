@@ -7,7 +7,7 @@ import (
 	"dinsos_kuburaya/models"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid" // <-- PASTIKAN IMPORT INI ADA
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -22,9 +22,9 @@ func CreateAdmin(c *gin.Context) {
 		return
 	}
 
-	// --- MENGATUR ID DAN ROLE SECARA MANUAL ---
-	user.ID = uuid.NewString() // Membuat ID baru
-	user.Role = "admin"        // Mengatur Role
+	// --- SET ID DAN ROLE ---
+	user.ID = uuid.NewString()
+	user.Role = "admin" // SetRole
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
 	if err != nil {
@@ -55,9 +55,9 @@ func CreateStaff(c *gin.Context) {
 		return
 	}
 
-	// --- MENGATUR ID DAN ROLE SECARA MANUAL ---
-	user.ID = uuid.NewString() // Membuat ID baru
-	user.Role = "staff"        // Mengatur Role
+	// --- SET ID DAN ROLE ---
+	user.ID = uuid.NewString()
+	user.Role = "staff" // SetRole
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
 	if err != nil {

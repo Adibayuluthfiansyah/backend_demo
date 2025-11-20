@@ -6,7 +6,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// LoginRoutes mendaftarkan endpoint untuk login
 func LoginRoutes(r *gin.RouterGroup) {
 
 	{

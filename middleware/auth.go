@@ -49,7 +49,6 @@ func AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// FIXED here
 		c.Set("user", user)
 
 		c.Next()

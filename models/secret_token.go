@@ -16,7 +16,6 @@ type SecretToken struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// Generate UUID sebelum disimpan
 func (s *SecretToken) BeforeCreate(tx *gorm.DB) (err error) {
 	s.ID = uuid.NewString()
 	return

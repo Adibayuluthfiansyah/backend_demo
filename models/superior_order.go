@@ -17,7 +17,6 @@ type SuperiorOrder struct {
 	UpdatedAt  time.Time `json:"updated_at"`
 }
 
-// Generate UUID sebelum disimpan
 func (s *SuperiorOrder) BeforeCreate(tx *gorm.DB) (err error) {
 	s.ID = uuid.NewString()
 	return

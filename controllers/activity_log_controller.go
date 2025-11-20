@@ -21,11 +21,10 @@ func CreateActivityLog(userID string, userName, action, message string) {
 	}()
 }
 
-// API: Mengambil semua data log untuk ditampilkan di dashboard
+// Mengambil semua data log untuk ditampilkan di dashboard
 func GetAllActivityLogs(c *gin.Context) {
 	var logs []models.ActivityLog
 
-	// Urutkan dari yang terbaru (DESC)
 	if err := config.DB.Order("created_at desc").Find(&logs).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil log aktivitas"})
 		return

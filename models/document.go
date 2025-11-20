@@ -20,10 +20,8 @@ type Document struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 	PublicID     string    `gorm:"type:varchar(255)" json:"public_id"`
 	ResourceType string    `gorm:"type:varchar(50)" json:"resource_type"`
-	// -------------------------
 }
 
-// Generate UUID sebelum disimpan
 func (d *Document) BeforeCreate(tx *gorm.DB) (err error) {
 	d.ID = uuid.NewString()
 	return

@@ -31,9 +31,9 @@ func main() {
 
 	// === SEEDING ADMIN PERTAMA ===
 
-	// Aktifkan saat pertama kali menjalankan aplikasi,
+	//  ==== Aktifkan ini saat pertama kali menjalankan aplikasi
 	// untuk membuat akun admin default.
-	// Setelah akun dibuat, sebaiknya nonaktifkan kembali kode ini.
+	// Setelah akun dibuat, nonaktifkan mode ini. ====
 
 	// var count int64
 	// config.DB.Model(&models.User{}).Count(&count)

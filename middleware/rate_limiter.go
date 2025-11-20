@@ -15,9 +15,7 @@ func RateLimiter() gin.HandlerFunc {
 		panic(err)
 	}
 
-	// Simpan di memory (bisa diganti Redis)
 	store := memory.NewStore()
 
-	// Kembalikan middleware limiter
 	return ginlimiter.NewMiddleware(limiter.New(store, rate))
 }

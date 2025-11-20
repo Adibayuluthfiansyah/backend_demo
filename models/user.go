@@ -8,7 +8,6 @@ import (
 )
 
 type User struct {
-	// Pastikan ini semua HURUF BESAR
 	ID        string    `gorm:"type:char(36);primaryKey" json:"id"`
 	Name      string    `gorm:"type:varchar(100)" json:"name"`
 	Username  string    `gorm:"type:varchar(100);unique" json:"username"`
@@ -18,9 +17,7 @@ type User struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// Generate UUID sebelum disimpan
 func (u *User) BeforeCreate(tx *gorm.DB) (err error) {
-	// Pastikan ini 'u.ID' (huruf besar)
 	u.ID = uuid.NewString()
 	return
 }

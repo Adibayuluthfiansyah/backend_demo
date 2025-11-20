@@ -9,11 +9,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// GetNotifications - Ambil semua notifikasi user yang login
+// Ambil semua notifikasi user yang login
 func GetNotifications(c *gin.Context) {
-	// ==========================================================
-	// PERBAIKAN DI SINI: Ambil "user", bukan "userID"
-	// ==========================================================
 	userRaw, exists := c.Get("user")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{
@@ -22,30 +19,27 @@ func GetNotifications(c *gin.Context) {
 		return
 	}
 
-	user, ok := userRaw.(models.User) // Casting ke models.User
+	user, ok := userRaw.(models.User)
 	if !ok {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Tipe data user di context tidak valid",
 		})
 		return
 	}
-	userIDStr := user.ID // Ambil ID dari objek user
-	// ==========================================================
+	userIDStr := user.ID
 
 	var notifications []models.Notification
 
-	// Ambil notifikasi user, urutkan dari yang terbaru
+	// Urutkan notifikasi dari yang terbaru
 	if err := config.DB.Where("user_id = ?", userIDStr).
 		Order("created_at DESC").
-		Limit(50). // Batasi 50 notifikasi terakhir
+		Limit(50).
 		Find(&notifications).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Gagal mengambil notifikasi",
 		})
 		return
 	}
-
-	// Hitung notifikasi yang belum dibaca
 	var unreadCount int64
 	config.DB.Model(&models.Notification{}).
 		Where("user_id = ? AND is_read = ?", userIDStr, false).
@@ -61,13 +55,9 @@ func GetNotifications(c *gin.Context) {
 	})
 }
 
-// MarkNotificationAsRead - Tandai notifikasi sebagai sudah dibaca
+// Tandai notifikasi sebagai sudah dibaca
 func MarkNotificationAsRead(c *gin.Context) {
 	notificationID := c.Param("id")
-
-	// ==========================================================
-	// PERBAIKAN DI SINI: Ambil "user", bukan "userID"
-	// ==========================================================
 	userRaw, exists := c.Get("user")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{
@@ -76,15 +66,14 @@ func MarkNotificationAsRead(c *gin.Context) {
 		return
 	}
 
-	user, ok := userRaw.(models.User) // Casting ke models.User
+	user, ok := userRaw.(models.User)
 	if !ok {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Tipe data user di context tidak valid",
 		})
 		return
 	}
-	userIDStr := user.ID // Ambil ID dari objek user
-	// ==========================================================
+	userIDStr := user.ID
 
 	var notification models.Notification
 
@@ -97,8 +86,8 @@ func MarkNotificationAsRead(c *gin.Context) {
 		return
 	}
 
-	// Update is_read menjadi true
-	if !notification.IsRead { // Hanya update jika belum dibaca
+	// Update jika sudah dibaca
+	if !notification.IsRead {
 		notification.IsRead = true
 		if err := config.DB.Save(&notification).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
@@ -113,9 +102,8 @@ func MarkNotificationAsRead(c *gin.Context) {
 	})
 }
 
-// CreateNotification - Helper function untuk membuat notifikasi (dipanggil dari controller lain)
+// Helper function untuk membuat notifikasi
 func CreateNotification(userID, message, link string) error {
-	// Fungsi ini sudah BENAR.
 	notification := models.Notification{
 		UserID:  userID,
 		Message: message,
