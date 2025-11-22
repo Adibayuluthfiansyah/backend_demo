@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -14,25 +15,27 @@ import (
 )
 
 // =======================
-// CREATE DOCUMENT
+// CREATE DOCUMENT (ADMIN)
 // =======================
 func CreateDocument(c *gin.Context) {
+	// 1. Ambil Input
 	sender := c.PostForm("sender")
 	subject := c.PostForm("subject")
 	letterType := c.PostForm("letter_type")
 
+	// 2. Cek User (Admin)
 	userInterface, exists := c.Get("user")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
 		return
 	}
-
 	user, ok := userInterface.(models.User)
 	if !ok {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to cast user"})
 		return
 	}
 
+	// 3. Handle File Upload
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "File tidak ditemukan"})
@@ -52,16 +55,14 @@ func CreateDocument(c *gin.Context) {
 		return
 	}
 
+	// 4. Tentukan Folder Cloudinary
 	ext := strings.ToLower(filepath.Ext(fileHeader.Filename))
 	resourceType := "raw"
-	folder := "arsip"
+	folder := "dinsos_kuburaya/arsip" // Sesuaikan dengan folder Anda
 
 	if ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" || ext == ".webp" {
 		resourceType = "image"
-		folder = "gambar"
-	} else if ext == ".pdf" {
-		resourceType = "raw"
-		folder = "arsip"
+		folder = "dinsos_kuburaya/gambar"
 	}
 
 	reader := bytes.NewReader(fileBytes)
@@ -71,6 +72,7 @@ func CreateDocument(c *gin.Context) {
 		return
 	}
 
+	// 5. Simpan ke Database
 	userID := user.ID
 	document := models.Document{
 		Sender:       sender,
@@ -91,8 +93,25 @@ func CreateDocument(c *gin.Context) {
 
 	CreateActivityLog(user.ID, user.Name, "UPLOAD_DOCUMENT", "Mengunggah dokumen: "+document.FileName)
 
+	// ============================================================
+	// FITUR NOTIFIKASI: Kirim ke SEMUA Staff
+	// ============================================================
+	go func() {
+		var staffs []models.User
+		// Ambil semua user yang role-nya 'staff'
+		if err := config.DB.Where("role = ?", "staff").Find(&staffs).Error; err == nil {
+			for _, staff := range staffs {
+				msg := fmt.Sprintf("Admin mengupload dokumen baru: %s", document.Subject)
+				// Link ini harus bisa dibuka oleh staff (lihat perubahan di documentstaff_controller)
+				link := fmt.Sprintf("/dashboard/my-document/%s", document.ID)
+
+				_ = CreateNotification(staff.ID, msg, link)
+			}
+		}
+	}()
+
 	c.JSON(http.StatusOK, gin.H{
-		"message":  "Dokumen berhasil diupload",
+		"message":  "Dokumen berhasil diupload dan notifikasi dikirim ke staff",
 		"document": document,
 		"file_url": uploadResult.SecureURL,
 	})
@@ -152,7 +171,7 @@ func GetDocuments(c *gin.Context) {
 }
 
 // =======================
-// GET DOCUMENT BY ID (FIXED PERMISSION FOR STAFF)
+// GET DOCUMENT BY ID
 // =======================
 func GetDocumentByID(c *gin.Context) {
 	id := c.Param("id")
@@ -167,11 +186,12 @@ func GetDocumentByID(c *gin.Context) {
 	errDoc := config.DB.Preload("User").Where("id = ?", id).First(&document).Error
 
 	if errDoc == nil {
+		// Cek akses jika bukan admin & bukan pemilik (jika logika kepemilikan diterapkan di admin doc)
+		// Namun karena dokumen admin bersifat publik untuk staff, biasanya staff boleh lihat.
+		// Logic lama: if document.UserID != user.ID (ini membatasi staff lihat doc admin).
+		// Kita ubah: Staff boleh lihat dokumen Admin.
 		if user.Role != "admin" {
-			if document.UserID == nil || *document.UserID != user.ID {
-				c.JSON(http.StatusForbidden, gin.H{"error": "Anda tidak memiliki akses ke dokumen admin ini"})
-				return
-			}
+			// Staff boleh baca dokumen admin (tidak ada batasan ID)
 		}
 
 		userName := "-"
@@ -196,6 +216,7 @@ func GetDocumentByID(c *gin.Context) {
 		return
 	}
 
+	// Cek di tabel staff jika tidak ketemu di admin
 	var docStaff models.DocumentStaff
 	errStaff := config.DB.Preload("User").First(&docStaff, "id = ?", id).Error
 
@@ -232,7 +253,7 @@ func GetDocumentByID(c *gin.Context) {
 }
 
 // =======================
-// UPDATE DOCUMENT (SUPPORT STAFF UPDATE)
+// UPDATE DOCUMENT
 // =======================
 func UpdateDocument(c *gin.Context) {
 	id := c.Param("id")
@@ -246,31 +267,20 @@ func UpdateDocument(c *gin.Context) {
 
 	var document models.Document
 	if err := config.DB.Where("id = ?", id).First(&document).Error; err == nil {
+		// Hanya admin yang boleh edit dokumen admin
 		if user.Role != "admin" {
-			if document.UserID == nil || *document.UserID != user.ID {
-				c.JSON(http.StatusForbidden, gin.H{"error": "Tidak punya akses edit"})
-				return
-			}
-		}
-		updateDocLogic(c, &document, user, "documents")
-		return
-	}
-
-	var docStaff models.DocumentStaff
-	if err := config.DB.Where("id = ?", id).First(&docStaff).Error; err == nil {
-		if user.Role != "admin" && docStaff.UserID != user.ID {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Tidak punya akses edit"})
+			c.JSON(http.StatusForbidden, gin.H{"error": "Hanya admin yang dapat mengedit dokumen ini"})
 			return
 		}
-		updateDocStaffLogic(c, &docStaff, user)
+		updateDocLogic(c, &document, user)
 		return
 	}
 
 	c.JSON(http.StatusNotFound, gin.H{"error": "Dokumen tidak ditemukan"})
 }
 
-// Helper untuk update tabel Document Admin
-func updateDocLogic(c *gin.Context, document *models.Document, user models.User, table string) {
+// Helper update logic
+func updateDocLogic(c *gin.Context, document *models.Document, user models.User) {
 	sender := c.PostForm("sender")
 	subject := c.PostForm("subject")
 	letterType := c.PostForm("letter_type")
@@ -285,7 +295,6 @@ func updateDocLogic(c *gin.Context, document *models.Document, user models.User,
 		document.LetterType = letterType
 	}
 
-	// Handle File Upload
 	fileHeader, err := c.FormFile("file")
 	if err == nil {
 		src, _ := fileHeader.Open()
@@ -295,10 +304,10 @@ func updateDocLogic(c *gin.Context, document *models.Document, user models.User,
 
 		ext := strings.ToLower(filepath.Ext(fileHeader.Filename))
 		resourceType := "raw"
-		folder := "arsip"
+		folder := "dinsos_kuburaya/arsip"
 		if ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" || ext == ".webp" {
 			resourceType = "image"
-			folder = "gambar"
+			folder = "dinsos_kuburaya/gambar"
 		}
 
 		if document.PublicID != "" {
@@ -326,61 +335,6 @@ func updateDocLogic(c *gin.Context, document *models.Document, user models.User,
 	c.JSON(http.StatusOK, gin.H{"message": "Dokumen berhasil diperbarui", "document": document})
 }
 
-// Helper untuk update tabel DocumentStaff Staff
-func updateDocStaffLogic(c *gin.Context, docStaff *models.DocumentStaff, user models.User) {
-	sender := c.PostForm("sender")
-	subject := c.PostForm("subject")
-	letterType := c.PostForm("letter_type")
-
-	if sender != "" {
-		docStaff.Sender = sender
-	}
-	if subject != "" {
-		docStaff.Subject = subject
-	}
-	if letterType != "" {
-		docStaff.LetterType = letterType
-	}
-
-	fileHeader, err := c.FormFile("file")
-	if err == nil {
-		src, _ := fileHeader.Open()
-		defer src.Close()
-		fileBytes, _ := io.ReadAll(src)
-		reader := bytes.NewReader(fileBytes)
-
-		ext := strings.ToLower(filepath.Ext(fileHeader.Filename))
-		resourceType := "raw"
-		folder := "arsip"
-		if ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" || ext == ".webp" {
-			resourceType = "image"
-			folder = "gambar"
-		}
-
-		if docStaff.PublicID != "" {
-			config.DeleteFromCloudinary(docStaff.PublicID, docStaff.ResourceType)
-		}
-
-		uploadResult, err := config.UploadToCloudinary(reader, fileHeader.Filename, folder, resourceType)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal upload file: " + err.Error()})
-			return
-		}
-
-		docStaff.FileName = uploadResult.SecureURL
-		docStaff.PublicID = uploadResult.PublicID
-		docStaff.ResourceType = uploadResult.ResourceType
-	}
-
-	if err := config.DB.Save(&docStaff).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal simpan update staff: " + err.Error()})
-		return
-	}
-
-	CreateActivityLog(user.ID, user.Name, "UPDATE_DOCUMENT", "Memperbarui dokumen staff: "+docStaff.Subject)
-	c.JSON(http.StatusOK, gin.H{"message": "Dokumen staff berhasil diperbarui", "document": docStaff})
-}
-
 // =======================
 // DELETE DOCUMENT
 // =======================
@@ -396,10 +350,8 @@ func DeleteDocument(c *gin.Context) {
 	var document models.Document
 	if err := config.DB.Where("id = ?", id).First(&document).Error; err == nil {
 		if user.Role != "admin" {
-			if document.UserID == nil || *document.UserID != user.ID {
-				c.JSON(http.StatusForbidden, gin.H{"error": "Tidak punya akses hapus"})
-				return
-			}
+			c.JSON(http.StatusForbidden, gin.H{"error": "Hanya admin yang dapat menghapus dokumen ini"})
+			return
 		}
 
 		if document.PublicID != "" {
@@ -411,8 +363,10 @@ func DeleteDocument(c *gin.Context) {
 		return
 	}
 
+	// Cek jika user mencoba menghapus dokumen staff via endpoint ini (opsional, biasanya lewat route staff)
 	var docStaff models.DocumentStaff
 	if err := config.DB.First(&docStaff, "id = ?", id).Error; err == nil {
+		// Admin boleh hapus dokumen staff
 		if user.Role != "admin" && docStaff.UserID != user.ID {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Tidak punya akses hapus"})
 			return
@@ -430,6 +384,9 @@ func DeleteDocument(c *gin.Context) {
 	c.JSON(http.StatusNotFound, gin.H{"error": "Dokumen tidak ditemukan"})
 }
 
+// =======================
+// DOWNLOAD DOCUMENT
+// =======================
 func DownloadDocument(c *gin.Context) {
 	id := c.Param("id")
 	userRaw, exists := c.Get("user")
@@ -441,12 +398,7 @@ func DownloadDocument(c *gin.Context) {
 
 	var document models.Document
 	if err := config.DB.First(&document, "id = ?", id).Error; err == nil {
-		if user.Role != "admin" {
-			if document.UserID == nil || *document.UserID != user.ID {
-				c.JSON(http.StatusForbidden, gin.H{"error": "Tidak memiliki akses"})
-				return
-			}
-		}
+		// Semua staff & admin boleh download dokumen admin
 		c.Redirect(http.StatusTemporaryRedirect, document.FileURL)
 		return
 	}

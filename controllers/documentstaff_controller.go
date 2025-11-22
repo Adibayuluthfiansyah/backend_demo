@@ -26,18 +26,23 @@ func CreateDocumentStaff(c *gin.Context) {
 	}
 	user := userRaw.(models.User)
 
-	sender := c.PostForm("sender")
 	subject := c.PostForm("subject")
+	// Sender dan LetterType opsional dari Frontend
+	sender := c.PostForm("sender")
 	letterType := c.PostForm("letter_type")
 
-	if sender == "" || subject == "" || letterType == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Sender, subject, dan letter_type wajib diisi"})
+	// Validasi Subject Wajib
+	if subject == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Subject wajib diisi"})
 		return
 	}
 
-	if letterType != "masuk" && letterType != "keluar" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "letter_type harus 'masuk' atau 'keluar'"})
-		return
+	// Default Value jika kosong (karena dihilangkan di frontend staff)
+	if sender == "" {
+		sender = user.Name // Default pengirim nama sendiri
+	}
+	if letterType == "" {
+		letterType = "keluar" // Default jenis surat
 	}
 
 	fileHeader, err := c.FormFile("file")
@@ -76,15 +81,12 @@ func CreateDocumentStaff(c *gin.Context) {
 		return
 	}
 
-	// Upload ke Cloudinary
 	uploadResult, err := config.UploadToCloudinary(reader, fileHeader.Filename, folder, resourceType)
 	if err != nil {
-		fmt.Println("Upload Error:", err) // Debug print
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Upload gagal: " + err.Error()})
 		return
 	}
 
-	// Simpan ke Database
 	document := models.DocumentStaff{
 		UserID:       user.ID,
 		Sender:       sender,
@@ -101,25 +103,21 @@ func CreateDocumentStaff(c *gin.Context) {
 		return
 	}
 
-	// CATAT LOG AKTIVITAS
+	// Log Activity
 	msg := fmt.Sprintf("Mengupload dokumen baru dengan subjek: %s", document.Subject)
 	LogActivity(user.ID, user.Name, "UPLOAD_DOKUMEN", msg)
 
-	// ============================================================
-	// NOTIFIKASI KE ADMIN
-	// ============================================================
+	// Notifikasi ke Admin
 	go func() {
 		var admins []models.User
 		if err := config.DB.Where("role = ?", "admin").Find(&admins).Error; err == nil {
 			for _, admin := range admins {
 				msg := fmt.Sprintf("Staff %s baru saja mengupload dokumen: %s", user.Name, document.Subject)
 				link := fmt.Sprintf("/dashboard/documents/%s", document.ID)
-
 				_ = CreateNotification(admin.ID, msg, link)
 			}
 		}
 	}()
-	config.DB.Preload("User").Find(&document)
 
 	c.JSON(http.StatusCreated, gin.H{
 		"message":  "Dokumen berhasil diupload",
@@ -128,10 +126,9 @@ func CreateDocumentStaff(c *gin.Context) {
 }
 
 // ======================================================
-// GET ALL STAFF DOCUMENTS (ADMIN + STAFF)
+// GET ALL STAFF DOCUMENTS (GABUNGAN ADMIN & STAFF)
 // ======================================================
 func GetDocumentStaffs(c *gin.Context) {
-	// 1. Ambil User
 	userRaw, exists := c.Get("user")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
@@ -144,171 +141,107 @@ func GetDocumentStaffs(c *gin.Context) {
 	search := c.Query("search")
 	letterType := c.Query("letter_type")
 
-	// ======================================================
-	// ADMIN: Gabungkan documents + document_staffs dengan UNION
-	// ======================================================
-	if user.Role == "admin" {
-		type CombinedDoc struct {
-			ID         string  `json:"id"`
-			Sender     string  `json:"sender"`
-			Subject    string  `json:"subject"`
-			LetterType string  `json:"letter_type"`
-			FileName   string  `json:"file_name"`
-			UserID     *string `json:"user_id"`
-			UserName   string  `json:"user_name"`
-			CreatedAt  string  `json:"created_at"`
-			UpdatedAt  string  `json:"updated_at"`
-			Source     string  `json:"source"`
-		}
+	// Struct khusus untuk menampung hasil gabungan tabel
+	type CombinedDoc struct {
+		ID         string  `json:"id"`
+		Sender     string  `json:"sender"`
+		Subject    string  `json:"subject"`
+		LetterType string  `json:"letter_type"`
+		FileName   string  `json:"file_name"`
+		UserID     *string `json:"user_id"`
+		UserName   string  `json:"user_name"`
+		CreatedAt  string  `json:"created_at"`
+		UpdatedAt  string  `json:"updated_at"`
+		Source     string  `json:"source"` // Untuk membedakan asal dokumen di frontend
+	}
 
-		var combinedDocs []CombinedDoc
+	var combinedDocs []CombinedDoc
 
-		searchWhere := ""
-		searchArgs := []interface{}{}
-		if search != "" {
-			searchPattern := "%" + search + "%"
-			searchWhere = "AND (d.sender LIKE ? OR d.subject LIKE ? OR d.file_name LIKE ? OR u.name LIKE ?)"
-			searchArgs = []interface{}{searchPattern, searchPattern, searchPattern, searchPattern}
-		}
+	// Filter Pencarian
+	searchWhere := ""
+	searchArgs := []interface{}{}
+	if search != "" {
+		searchPattern := "%" + search + "%"
+		// Mencari di sender, subject, atau nama file
+		searchWhere = "AND (sender LIKE ? OR subject LIKE ? OR file_name LIKE ?)"
+		searchArgs = []interface{}{searchPattern, searchPattern, searchPattern}
+	}
 
-		letterTypeWhere := ""
-		letterTypeArgs := []interface{}{}
-		if letterType != "" && letterType != "all" {
-			letterTypeWhere = "AND d.letter_type = ?"
-			letterTypeArgs = []interface{}{letterType}
-		}
+	// Filter Tipe Surat
+	letterTypeWhere := ""
+	letterTypeArgs := []interface{}{}
+	if letterType != "" && letterType != "all" {
+		letterTypeWhere = "AND letter_type = ?"
+		letterTypeArgs = []interface{}{letterType}
+	}
 
-		query := fmt.Sprintf(`
+	// LOGIKA FILTER USER:
+	// 1. Tabel `documents` (Admin Upload): TIDAK ADA filter user_id, karena staff boleh lihat semua dokumen admin.
+	// 2. Tabel `document_staffs` (Staff Upload):
+	//    - Jika Admin: Lihat semua.
+	//    - Jika Staff: Hanya lihat milik sendiri.
+
+	staffFilter := ""
+	if user.Role != "admin" {
+		staffFilter = fmt.Sprintf("AND user_id = '%s'", user.ID)
+	}
+
+	// QUERY GABUNGAN (UNION)
+	query := fmt.Sprintf(`
+		(
 			SELECT 
-				d.id, 
-				d.sender, 
-				d.subject, 
-				d.letter_type, 
-				d.file_url as file_name, 
-				d.user_id,
-				COALESCE(u.name, '-') as user_name,
-				d.created_at, 
-				d.updated_at, 
-				'document' as source
-			FROM documents d
-			LEFT JOIN users u ON d.user_id = u.id
+				id, sender, subject, letter_type, file_url as file_name, 
+				user_id, 'Admin' as user_name, created_at, updated_at, 'document' as source
+			FROM documents
 			WHERE 1=1 %s %s
-			
-			UNION ALL
-			
+		)
+		UNION ALL
+		(
 			SELECT 
-				ds.id, 
-				ds.sender, 
-				ds.subject, 
-				ds.letter_type, 
-				ds.file_name, 
-				ds.user_id,
-				COALESCE(u2.name, '-') as user_name,
-				ds.created_at, 
-				ds.updated_at, 
-				'document_staff' as source
-			FROM document_staffs ds
-			LEFT JOIN users u2 ON ds.user_id = u2.id
-			WHERE 1=1 %s %s
-			
-			ORDER BY created_at DESC
-			LIMIT ? OFFSET ?
-		`, searchWhere, letterTypeWhere, searchWhere, letterTypeWhere)
+				id, sender, subject, letter_type, file_name, 
+				user_id, 'Staff' as user_name, created_at, updated_at, 'document_staff' as source
+			FROM document_staffs
+			WHERE 1=1 %s %s %s
+		)
+		ORDER BY created_at DESC
+		LIMIT ? OFFSET ?
+	`, searchWhere, letterTypeWhere, searchWhere, letterTypeWhere, staffFilter)
 
-		args := []interface{}{}
-		args = append(args, searchArgs...)
-		args = append(args, letterTypeArgs...)
-		args = append(args, searchArgs...)
-		args = append(args, letterTypeArgs...)
-		args = append(args, perPage, (page-1)*perPage)
+	// Susun Arguments
+	args := []interface{}{}
+	// Args untuk query pertama (Documents Admin)
+	args = append(args, searchArgs...)
+	args = append(args, letterTypeArgs...)
+	// Args untuk query kedua (Document Staffs)
+	args = append(args, searchArgs...)
+	args = append(args, letterTypeArgs...)
+	// Args untuk Limit/Offset
+	args = append(args, perPage, (page-1)*perPage)
 
-		// Execute query
-		err := config.DB.Raw(query, args...).Scan(&combinedDocs).Error
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil dokumen: " + err.Error()})
-			return
-		}
-
-		// Hitung total
-		countQuery := fmt.Sprintf(`
-			SELECT COUNT(*) as total FROM (
-				SELECT d.id 
-				FROM documents d
-				LEFT JOIN users u ON d.user_id = u.id
-				WHERE 1=1 %s %s
-				
-				UNION ALL
-				
-				SELECT ds.id 
-				FROM document_staffs ds
-				LEFT JOIN users u2 ON ds.user_id = u2.id
-				WHERE 1=1 %s %s
-			) as combined
-		`, searchWhere, letterTypeWhere, searchWhere, letterTypeWhere)
-
-		countArgs := []interface{}{}
-		countArgs = append(countArgs, searchArgs...)
-		countArgs = append(countArgs, letterTypeArgs...)
-		countArgs = append(countArgs, searchArgs...)
-		countArgs = append(countArgs, letterTypeArgs...)
-
-		var total int64
-		config.DB.Raw(countQuery, countArgs...).Count(&total)
-
-		// Hitung last page
-		lastPage := int(total) / perPage
-		if int(total)%perPage != 0 {
-			lastPage++
-		}
-		if lastPage == 0 && total > 0 {
-			lastPage = 1
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"documents":    combinedDocs,
-			"total":        total,
-			"current_page": page,
-			"last_page":    lastPage,
-			"per_page":     perPage,
-		})
+	if err := config.DB.Raw(query, args...).Scan(&combinedDocs).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil dokumen: " + err.Error()})
 		return
 	}
 
-	// ======================================================
-	// STAFF hanya ambil document staff
-	// ======================================================
-	var documents []models.DocumentStaff
+	// Hitung Total (Untuk Pagination Frontend)
+	countQuery := fmt.Sprintf(`
+		SELECT COUNT(*) FROM (
+			SELECT id FROM documents WHERE 1=1 %s %s
+			UNION ALL
+			SELECT id FROM document_staffs WHERE 1=1 %s %s %s
+		) as total_docs
+	`, searchWhere, letterTypeWhere, searchWhere, letterTypeWhere, staffFilter)
 
-	query := config.DB.Model(&models.DocumentStaff{}).Where("user_id = ?", user.ID)
-
-	if search != "" {
-		searchQuery := "%" + search + "%"
-		query = query.Where(
-			"sender LIKE ? OR subject LIKE ? OR file_name LIKE ?",
-			searchQuery, searchQuery, searchQuery,
-		)
-	}
-
-	if letterType != "" && letterType != "all" {
-		query = query.Where("letter_type = ?", letterType)
-	}
+	countArgs := []interface{}{}
+	countArgs = append(countArgs, searchArgs...)
+	countArgs = append(countArgs, letterTypeArgs...)
+	countArgs = append(countArgs, searchArgs...)
+	countArgs = append(countArgs, letterTypeArgs...)
 
 	var total int64
-	query.Count(&total)
+	config.DB.Raw(countQuery, countArgs...).Count(&total)
 
-	offset := (page - 1) * perPage
-	err := query.
-		Offset(offset).
-		Limit(perPage).
-		Order("created_at DESC").
-		Preload("User").
-		Find(&documents).Error
-
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil dokumen"})
-		return
-	}
-
+	// Hitung Last Page
 	lastPage := int(total) / perPage
 	if int(total)%perPage != 0 {
 		lastPage++
@@ -318,7 +251,7 @@ func GetDocumentStaffs(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"documents":    documents,
+		"documents":    combinedDocs,
 		"total":        total,
 		"current_page": page,
 		"last_page":    lastPage,
@@ -327,33 +260,38 @@ func GetDocumentStaffs(c *gin.Context) {
 }
 
 // ======================================================
-// GET BY ID Cek di KEDUA tabel
+// GET STAFF DOCUMENT BY ID (Mencari di kedua tabel)
 // ======================================================
 func GetDocumentStaffByID(c *gin.Context) {
 	id := c.Param("id")
 
+	// Cek Tabel Staff Dulu
 	var docStaff models.DocumentStaff
 	errStaff := config.DB.Preload("User").First(&docStaff, "id = ?", id).Error
 
 	if errStaff == nil {
+		// Ketemu di tabel staff
 		c.JSON(http.StatusOK, gin.H{"document": docStaff})
 		return
 	}
 
+	// Jika tidak, Cek Tabel Admin
 	var doc models.Document
 	errDoc := config.DB.Preload("User").First(&doc, "id = ?", id).Error
 
 	if errDoc == nil {
+		// Ketemu di tabel admin -> Konversi format response agar frontend staff tidak error
 		response := gin.H{
 			"id":          doc.ID,
 			"sender":      doc.Sender,
 			"subject":     doc.Subject,
 			"letter_type": doc.LetterType,
-			"file_name":   doc.FileURL,
+			"file_name":   doc.FileURL, // Mapping FileURL ke file_name
 			"user_id":     doc.UserID,
 			"created_at":  doc.CreatedAt,
 			"updated_at":  doc.UpdatedAt,
 			"user":        doc.User,
+			"source":      "document", // Penanda
 		}
 		c.JSON(http.StatusOK, gin.H{"document": response})
 		return
@@ -400,10 +338,6 @@ func UpdateDocumentStaff(c *gin.Context) {
 		updates["subject"] = subject
 	}
 	if letterType != "" {
-		if letterType != "masuk" && letterType != "keluar" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "letter_type harus 'masuk' atau 'keluar'"})
-			return
-		}
 		updates["letter_type"] = letterType
 	}
 
@@ -439,19 +373,14 @@ func UpdateDocumentStaff(c *gin.Context) {
 			return
 		}
 
-		// Upload to Cloudinary
 		uploadResult, err := config.UploadToCloudinary(reader, fileHeader.Filename, folder, resourceType)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Upload gagal: " + err.Error()})
 			return
 		}
 
-		// Delete data lama jika ada
 		if document.PublicID != "" {
-			err := config.DeleteFromCloudinary(document.PublicID, document.ResourceType)
-			if err != nil {
-				fmt.Println("Warning: Gagal menghapus file lama:", err)
-			}
+			config.DeleteFromCloudinary(document.PublicID, document.ResourceType)
 		}
 		updates["file_name"] = uploadResult.SecureURL
 		updates["public_id"] = uploadResult.PublicID
@@ -474,7 +403,7 @@ func UpdateDocumentStaff(c *gin.Context) {
 }
 
 // ======================================================
-// DELETE Cek di KEDUA tabel
+// DELETE DOCUMENT STAFF
 // ======================================================
 func DeleteDocumentStaff(c *gin.Context) {
 	id := c.Param("id")
@@ -483,7 +412,6 @@ func DeleteDocumentStaff(c *gin.Context) {
 	errStaff := config.DB.First(&docStaff, "id = ?", id).Error
 
 	if errStaff == nil {
-		// Hapus file dari Cloudinary
 		if docStaff.PublicID != "" {
 			config.DeleteFromCloudinary(docStaff.PublicID, docStaff.ResourceType)
 		}
@@ -492,6 +420,7 @@ func DeleteDocumentStaff(c *gin.Context) {
 		return
 	}
 
+	// Jika admin menghapus dokumen via endpoint ini
 	var doc models.Document
 	errDoc := config.DB.First(&doc, "id = ?", id).Error
 
@@ -500,20 +429,15 @@ func DeleteDocumentStaff(c *gin.Context) {
 			config.DeleteFromCloudinary(doc.PublicID, doc.ResourceType)
 		}
 		config.DB.Delete(&doc)
-
-		if userRaw, exists := c.Get("user"); exists {
-			actor := userRaw.(models.User)
-			CreateActivityLog(actor.ID, actor.Name, "DELETE_DOCUMENT", "Menghapus dokumen: "+doc.FileName)
-		}
-
 		c.JSON(http.StatusOK, gin.H{"message": "Dokumen berhasil dihapus"})
 		return
 	}
+
 	c.JSON(http.StatusNotFound, gin.H{"error": "Dokumen tidak ditemukan"})
 }
 
 // ======================================================
-// DOWNLOAD Cek di KEDUA tabel
+// DOWNLOAD DOCUMENT STAFF
 // ======================================================
 func DownloadDocumentStaff(c *gin.Context) {
 	id := c.Param("id")
