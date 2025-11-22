@@ -18,12 +18,13 @@ import (
 // CREATE DOCUMENT (ADMIN)
 // =======================
 func CreateDocument(c *gin.Context) {
-	// 1. Ambil Input
+	// Ambil Input
 	sender := c.PostForm("sender")
 	subject := c.PostForm("subject")
 	letterType := c.PostForm("letter_type")
+	targetUserIDsStr := c.PostForm("target_user_ids")
 
-	// 2. Cek User (Admin)
+	// Cek User (Admin)
 	userInterface, exists := c.Get("user")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
@@ -35,7 +36,7 @@ func CreateDocument(c *gin.Context) {
 		return
 	}
 
-	// 3. Handle File Upload
+	//  Handle File Upload
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "File tidak ditemukan"})
@@ -55,10 +56,10 @@ func CreateDocument(c *gin.Context) {
 		return
 	}
 
-	// 4. Tentukan Folder Cloudinary
+	//  Tentukan Folder Cloudinary
 	ext := strings.ToLower(filepath.Ext(fileHeader.Filename))
 	resourceType := "raw"
-	folder := "dinsos_kuburaya/arsip" // Sesuaikan dengan folder Anda
+	folder := "dinsos_kuburaya/arsip"
 
 	if ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" || ext == ".webp" {
 		resourceType = "image"
@@ -72,7 +73,7 @@ func CreateDocument(c *gin.Context) {
 		return
 	}
 
-	// 5. Simpan ke Database
+	// Simpan ke Database
 	userID := user.ID
 	document := models.Document{
 		Sender:       sender,
@@ -94,24 +95,59 @@ func CreateDocument(c *gin.Context) {
 	CreateActivityLog(user.ID, user.Name, "UPLOAD_DOCUMENT", "Mengunggah dokumen: "+document.FileName)
 
 	// ============================================================
-	// FITUR NOTIFIKASI: Kirim ke SEMUA Staff
+	//  LOGIKA SUPERIOR ORDER & NOTIFIKASI
 	// ============================================================
-	go func() {
+	// Capture data agar aman (Safe Mode)
+	docID := fmt.Sprintf("%v", document.ID)
+	docSubject := document.Subject
+
+	// Jalankan Background Process
+	go func(dID, dSubject, tIDs string) {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Printf("Warning: Recovered from panic: %v\n", r)
+			}
+		}()
+
+		processedUsers := make(map[string]bool)
+		//  PROSES DISPOSISI (Jika ada staff dipilih)
+		if tIDs != "" {
+			targetUserIDs := strings.Split(tIDs, ",")
+			for _, targetID := range targetUserIDs {
+				targetID = strings.TrimSpace(targetID)
+				if targetID == "" {
+					continue
+				}
+
+				order := models.SuperiorOrder{DocumentID: dID, UserID: targetID}
+
+				if err := config.DB.Create(&order).Error; err == nil {
+					msg := fmt.Sprintf("PERINTAH: Anda menerima disposisi baru: %s", dSubject)
+					link := fmt.Sprintf("/dashboard/my-document/%s", dID)
+					_ = CreateNotification(targetID, msg, link)
+					processedUsers[targetID] = true
+				}
+			}
+		}
+
+		//  PROSES BROADCAST (Ke semua staff lain)
 		var staffs []models.User
-		// Ambil semua user yang role-nya 'staff'
 		if err := config.DB.Where("role = ?", "staff").Find(&staffs).Error; err == nil {
 			for _, staff := range staffs {
-				msg := fmt.Sprintf("Admin mengupload dokumen baru: %s", document.Subject)
-				// Link ini harus bisa dibuka oleh staff (lihat perubahan di documentstaff_controller)
-				link := fmt.Sprintf("/dashboard/my-document/%s", document.ID)
+				if processedUsers[staff.ID] {
+					continue
+				}
 
+				msg := fmt.Sprintf("INFO: Admin mengupload dokumen baru: %s", dSubject)
+				link := fmt.Sprintf("/dashboard/my-document/%s", dID)
 				_ = CreateNotification(staff.ID, msg, link)
 			}
 		}
-	}()
+
+	}(docID, docSubject, targetUserIDsStr)
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":  "Dokumen berhasil diupload dan notifikasi dikirim ke staff",
+		"message":  "Dokumen berhasil diupload dan diproses",
 		"document": document,
 		"file_url": uploadResult.SecureURL,
 	})
@@ -186,12 +222,8 @@ func GetDocumentByID(c *gin.Context) {
 	errDoc := config.DB.Preload("User").Where("id = ?", id).First(&document).Error
 
 	if errDoc == nil {
-		// Cek akses jika bukan admin & bukan pemilik (jika logika kepemilikan diterapkan di admin doc)
-		// Namun karena dokumen admin bersifat publik untuk staff, biasanya staff boleh lihat.
-		// Logic lama: if document.UserID != user.ID (ini membatasi staff lihat doc admin).
-		// Kita ubah: Staff boleh lihat dokumen Admin.
 		if user.Role != "admin" {
-			// Staff boleh baca dokumen admin (tidak ada batasan ID)
+			c.JSON(http.StatusForbidden, gin.H{"error": "Anda tidak memiliki akses ke dokumen admin"})
 		}
 
 		userName := "-"
@@ -363,7 +395,7 @@ func DeleteDocument(c *gin.Context) {
 		return
 	}
 
-	// Cek jika user mencoba menghapus dokumen staff via endpoint ini (opsional, biasanya lewat route staff)
+	// Cek jika user mencoba menghapus dokumen staff via endpoint ini
 	var docStaff models.DocumentStaff
 	if err := config.DB.First(&docStaff, "id = ?", id).Error; err == nil {
 		// Admin boleh hapus dokumen staff
@@ -398,7 +430,6 @@ func DownloadDocument(c *gin.Context) {
 
 	var document models.Document
 	if err := config.DB.First(&document, "id = ?", id).Error; err == nil {
-		// Semua staff & admin boleh download dokumen admin
 		c.Redirect(http.StatusTemporaryRedirect, document.FileURL)
 		return
 	}

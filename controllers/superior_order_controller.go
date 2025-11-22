@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"fmt"
 	"net/http"
 
 	"dinsos_kuburaya/config"
@@ -10,7 +11,7 @@ import (
 )
 
 // ======================================================
-// CREATE SuperiorOrder
+// CREATE SuperiorOrder WITH NOTIFICATION
 // ======================================================
 func CreateSuperiorOrder(c *gin.Context) {
 	var input struct {
@@ -23,8 +24,22 @@ func CreateSuperiorOrder(c *gin.Context) {
 		return
 	}
 
+	// Ambil info dokumen untuk pesan notifikasi
+	var doc models.Document
+	if err := config.DB.First(&doc, "id = ?", input.DocumentID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Document not found"})
+		return
+	}
+
 	var created []models.SuperiorOrder
 	for _, userID := range input.UserIDs {
+		// Cek duplikasi
+		var count int64
+		config.DB.Model(&models.SuperiorOrder{}).Where("document_id = ? AND user_id = ?", input.DocumentID, userID).Count(&count)
+		if count > 0 {
+			continue
+		}
+
 		order := models.SuperiorOrder{
 			DocumentID: input.DocumentID,
 			UserID:     userID,
@@ -34,9 +49,15 @@ func CreateSuperiorOrder(c *gin.Context) {
 			return
 		}
 		created = append(created, order)
+
+		go func(uid string) {
+			msg := fmt.Sprintf("Anda menerima disposisi baru: %s", doc.Subject)
+			link := fmt.Sprintf("/dashboard/my-document/%s", doc.ID)
+			_ = CreateNotification(uid, msg, link)
+		}(userID)
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"message": "SuperiorOrder created", "data": created})
+	c.JSON(http.StatusCreated, gin.H{"message": "SuperiorOrder created and notifications sent", "data": created})
 }
 
 // ======================================================
